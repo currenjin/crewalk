@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -13,7 +14,7 @@ type Config struct {
 }
 
 type ProjectConfig struct {
-	Path        string `toml:"path"`
+	Path         string `toml:"path"`
 	WorktreeBase string `toml:"worktree_base"`
 }
 
@@ -23,7 +24,10 @@ type ClaudeConfig struct {
 }
 
 func Load() (*Config, error) {
-	cfg := defaults()
+	cfg, err := fromCwd()
+	if err != nil {
+		return nil, err
+	}
 
 	path, err := configPath()
 	if err != nil {
@@ -41,17 +45,41 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-func defaults() *Config {
-	home, _ := os.UserHomeDir()
+// fromCwd detects the project root from the current working directory
+// by walking up to find the nearest .git directory.
+func fromCwd() (*Config, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	projectPath, err := findGitRoot(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("not inside a git repository (run crewalk from your project root): %w", err)
+	}
+
 	return &Config{
 		Project: ProjectConfig{
-			Path:        filepath.Join(home, "project"),
-			WorktreeBase: filepath.Join(home, "worktree"),
+			Path:         projectPath,
+			WorktreeBase: filepath.Join(filepath.Dir(projectPath), "worktree"),
 		},
 		Claude: ClaudeConfig{
 			Command: "claude",
 			Args:    []string{"--dangerously-skip-permissions"},
 		},
+	}, nil
+}
+
+func findGitRoot(dir string) (string, error) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no .git found")
+		}
+		dir = parent
 	}
 }
 
