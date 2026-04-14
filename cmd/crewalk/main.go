@@ -3,25 +3,29 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/currenjin/crewalk/internal/ipc"
 	"github.com/currenjin/crewalk/internal/tui"
+	"github.com/currenjin/crewalk/internal/watcher"
 )
 
 func main() {
-	server := ipc.NewServer()
-	if err := server.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start IPC server: %v\n", err)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to get home dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer server.Stop()
+
+	projectsDir := filepath.Join(homeDir, ".claude", "projects")
+	w := watcher.New(projectsDir)
+	w.Start()
 
 	m := tui.New()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
-	go forwardIPCEvents(server, p)
+	go forwardWatcherEvents(w, p)
 	go simulateWork(p)
 
 	if _, err := p.Run(); err != nil {
@@ -30,23 +34,13 @@ func main() {
 	}
 }
 
-func forwardIPCEvents(server *ipc.Server, p *tea.Program) {
-	for event := range server.Events() {
-		switch event.Type {
-		case ipc.EventPhaseChange:
-			p.Send(tui.PhaseChangeMsg{
-				TicketID: event.TicketID,
-				Phase:    tui.PhaseFromString(event.Phase),
-				Status:   event.Status,
-			})
-		case ipc.EventAskQuestion:
-			responseCh := make(chan string, 1)
-			p.Send(tui.AskQuestionMsg{
-				TicketID: event.TicketID,
-				Text:     event.Text,
-				Response: responseCh,
-			})
-		}
+func forwardWatcherEvents(w *watcher.Watcher, p *tea.Program) {
+	for event := range w.Events() {
+		p.Send(tui.PhaseChangeMsg{
+			TicketID: event.TicketID,
+			Phase:    tui.PhaseFromString(event.Phase),
+			Status:   event.Status,
+		})
 	}
 }
 
