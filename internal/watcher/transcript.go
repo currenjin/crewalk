@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,8 @@ type Watcher struct {
 	events      chan PhaseEvent
 	questions   chan QuestionEvent
 	offsets     map[string]int64
+	mu          sync.Mutex
+	stop        chan struct{}
 }
 
 func New(projectsDir string) *Watcher {
@@ -53,6 +56,7 @@ func New(projectsDir string) *Watcher {
 		events:      make(chan PhaseEvent, 100),
 		questions:   make(chan QuestionEvent, 20),
 		offsets:     make(map[string]int64),
+		stop:        make(chan struct{}),
 	}
 }
 
@@ -68,10 +72,23 @@ func (w *Watcher) Start() {
 	go w.poll()
 }
 
+func (w *Watcher) Stop() {
+	close(w.stop)
+}
+
 func (w *Watcher) poll() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	defer close(w.events)
+	defer close(w.questions)
+
 	for {
-		w.scanAll()
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-w.stop:
+			return
+		case <-ticker.C:
+			w.scanAll()
+		}
 	}
 }
 
@@ -92,8 +109,15 @@ func (w *Watcher) scanFile(path string) {
 		return
 	}
 
+	w.mu.Lock()
 	offset := w.offsets[path]
-	if info.Size() <= offset {
+	// Reset offset if file was truncated
+	if info.Size() < offset {
+		offset = 0
+	}
+	w.mu.Unlock()
+
+	if info.Size() == offset {
 		return
 	}
 
@@ -104,7 +128,9 @@ func (w *Watcher) scanFile(path string) {
 	defer f.Close()
 
 	if offset > 0 {
-		f.Seek(offset, 0)
+		if _, err := f.Seek(offset, 0); err != nil {
+			return
+		}
 	}
 
 	scanner := bufio.NewScanner(f)
@@ -114,7 +140,9 @@ func (w *Watcher) scanFile(path string) {
 		w.parseLine(scanner.Text())
 	}
 
+	w.mu.Lock()
 	w.offsets[path] = info.Size()
+	w.mu.Unlock()
 }
 
 func (w *Watcher) parseLine(line string) {
@@ -139,9 +167,10 @@ func (w *Watcher) parseLine(line string) {
 
 		if content.Name == "AskUserQuestion" {
 			text := extractQuestionText(content.Input)
-			w.questions <- QuestionEvent{
-				TicketID: ticketID,
-				Text:     text,
+			select {
+			case w.questions <- QuestionEvent{TicketID: ticketID, Text: text}:
+			case <-w.stop:
+				return
 			}
 			continue
 		}
@@ -150,10 +179,10 @@ func (w *Watcher) parseLine(line string) {
 		if phase == "" {
 			continue
 		}
-		w.events <- PhaseEvent{
-			TicketID: ticketID,
-			Phase:    phase,
-			Status:   status,
+		select {
+		case w.events <- PhaseEvent{TicketID: ticketID, Phase: phase, Status: status}:
+		case <-w.stop:
+			return
 		}
 	}
 }

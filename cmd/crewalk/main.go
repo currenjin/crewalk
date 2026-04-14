@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,6 +32,9 @@ func main() {
 
 	sessionMgr := session.NewManager(cfg)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	m := tui.New()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
@@ -40,36 +44,59 @@ func main() {
 		}
 	}
 
-	go forwardPhaseEvents(w, p)
-	go forwardQuestionEvents(w, p, sessionMgr)
+	go forwardPhaseEvents(ctx, w, p)
+	go forwardQuestionEvents(ctx, w, p, sessionMgr)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	cancel()
+	w.Stop()
 }
 
-func forwardPhaseEvents(w *watcher.Watcher, p *tea.Program) {
-	for event := range w.Events() {
-		p.Send(tui.PhaseChangeMsg{
-			TicketID: event.TicketID,
-			Phase:    tui.PhaseFromString(event.Phase),
-			Status:   event.Status,
-		})
+func forwardPhaseEvents(ctx context.Context, w *watcher.Watcher, p *tea.Program) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-w.Events():
+			if !ok {
+				return
+			}
+			p.Send(tui.PhaseChangeMsg{
+				TicketID: event.TicketID,
+				Phase:    tui.PhaseFromString(event.Phase),
+				Status:   event.Status,
+			})
+		}
 	}
 }
 
-func forwardQuestionEvents(w *watcher.Watcher, p *tea.Program, mgr *session.Manager) {
-	for qEvent := range w.Questions() {
-		responseCh := make(chan string, 1)
-		p.Send(tui.AskQuestionMsg{
-			TicketID: qEvent.TicketID,
-			Text:     qEvent.Text,
-			Response: responseCh,
-		})
-		go func(ticketID string, ch <-chan string) {
-			answer := <-ch
-			mgr.WriteToSession(ticketID, answer+"\n")
-		}(qEvent.TicketID, responseCh)
+func forwardQuestionEvents(ctx context.Context, w *watcher.Watcher, p *tea.Program, mgr *session.Manager) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case qEvent, ok := <-w.Questions():
+			if !ok {
+				return
+			}
+			responseCh := make(chan string, 1)
+			p.Send(tui.AskQuestionMsg{
+				TicketID: qEvent.TicketID,
+				Text:     qEvent.Text,
+				Response: responseCh,
+			})
+			// Single goroutine per question — cancelled via ctx if program exits
+			go func(ticketID string, ch <-chan string) {
+				select {
+				case answer := <-ch:
+					mgr.WriteToSession(ticketID, answer+"\n")
+				case <-ctx.Done():
+				}
+			}(qEvent.TicketID, responseCh)
+		}
 	}
 }

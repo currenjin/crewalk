@@ -216,13 +216,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AskQuestionMsg:
 		ticket := m.findTicket(msg.TicketID)
-		if ticket != nil {
-			ticket.Question = &Question{Text: msg.Text, Response: msg.Response}
-			m.questionQueue = append(m.questionQueue, ticket)
-			if len(m.questionQueue) == 1 {
-				ticket.IsAsking = true
-				m.mode = modeQuestion
-			}
+		if ticket == nil {
+			// Ticket gone before question arrived — unblock the waiting goroutine
+			msg.Response <- ""
+			break
+		}
+		ticket.Question = &Question{Text: msg.Text, Response: msg.Response}
+		m.questionQueue = append(m.questionQueue, ticket)
+		if len(m.questionQueue) == 1 {
+			ticket.IsAsking = true
+			m.mode = modeQuestion
 		}
 
 	case PhaseChangeMsg:

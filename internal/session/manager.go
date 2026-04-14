@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/currenjin/crewalk/internal/config"
@@ -44,8 +45,7 @@ func (m *Manager) StartTicket(ticketID string) error {
 	}
 
 	m.sessions[ticketID] = s
-
-	go m.waitAndCleanup(ticketID, worktreePath)
+	go m.waitAndCleanup(ticketID, worktreePath, s)
 
 	return nil
 }
@@ -71,20 +71,20 @@ func (m *Manager) StopTicket(ticketID string) {
 
 	if exists {
 		s.Stop()
-		m.git.RemoveWorktree(m.cfg.WorktreePath(ticketID))
+		if err := m.git.RemoveWorktree(m.cfg.WorktreePath(ticketID)); err != nil {
+			log.Printf("warn: failed to remove worktree for %s: %v", ticketID, err)
+		}
 	}
 }
 
-func (m *Manager) waitAndCleanup(ticketID, worktreePath string) {
-	s := m.sessions[ticketID]
-	if s == nil {
-		return
-	}
+func (m *Manager) waitAndCleanup(ticketID, worktreePath string, s *Session) {
 	s.Wait()
 
 	m.mu.Lock()
 	delete(m.sessions, ticketID)
 	m.mu.Unlock()
 
-	m.git.RemoveWorktree(worktreePath)
+	if err := m.git.RemoveWorktree(worktreePath); err != nil {
+		log.Printf("warn: failed to remove worktree for %s: %v", ticketID, err)
+	}
 }

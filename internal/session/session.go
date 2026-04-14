@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
@@ -11,6 +12,7 @@ type Session struct {
 	TicketID string
 	cmd      *exec.Cmd
 	stdin    io.WriteCloser
+	done     chan struct{}
 }
 
 func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Session, error) {
@@ -31,6 +33,7 @@ func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Sess
 		TicketID: ticketID,
 		cmd:      cmd,
 		stdin:    stdin,
+		done:     make(chan struct{}),
 	}
 
 	go s.injectInitialCommand(ticketID)
@@ -39,8 +42,15 @@ func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Sess
 }
 
 func (s *Session) injectInitialCommand(ticketID string) {
-	time.Sleep(3 * time.Second)
-	s.Write(fmt.Sprintf("/work %s\n", ticketID))
+	select {
+	case <-time.After(3 * time.Second):
+	case <-s.done:
+		return
+	}
+	if err := s.Write(fmt.Sprintf("/work %s\n", ticketID)); err != nil {
+		// Session already closed — expected if Stop() was called early
+		return
+	}
 }
 
 func (s *Session) Write(input string) error {
@@ -49,9 +59,30 @@ func (s *Session) Write(input string) error {
 }
 
 func (s *Session) Stop() {
+	select {
+	case <-s.done:
+		return
+	default:
+		close(s.done)
+	}
+
 	s.stdin.Close()
-	if s.cmd.Process != nil {
+
+	if s.cmd.Process == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- s.cmd.Wait() }()
+
+	select {
+	case <-ctx.Done():
 		s.cmd.Process.Kill()
+		s.cmd.Wait()
+	case <-done:
 	}
 }
 
