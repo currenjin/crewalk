@@ -81,24 +81,29 @@ type Ticket struct {
 
 type tickMsg time.Time
 
+type inputMode int
+
+const (
+	modeNormal inputMode = iota
+	modeNewTicket
+	modeQuestion
+)
+
 type Model struct {
-	tickets      []*Ticket
+	tickets       []*Ticket
 	questionQueue []*Ticket
-	inputBuffer  string
-	width        int
-	height       int
-	tick         int
+	inputBuffer   string
+	mode          inputMode
+	statusMsg     string
+	width         int
+	height        int
+	tick          int
+
+	OnStartTicket func(ticketID string)
 }
 
 func New() Model {
-	return Model{
-		tickets: []*Ticket{
-			{ID: "RP-1234", Phase: PhaseCoding, Status: "go 루프 중", PosX: 2, TargetX: 2},
-			{ID: "RP-5678", Phase: PhasePlanning, Status: "계획 생성 중", PosX: 0, TargetX: 0},
-			{ID: "RP-9012", Phase: PhaseReviewing, Status: "리뷰 중", PosX: 3, TargetX: 3},
-			{ID: "RP-0001", Phase: PhaseDone, Status: "완료", PosX: 5, TargetX: 5},
-		},
-	}
+	return Model{}
 }
 
 func tickCmd() tea.Cmd {
@@ -137,29 +142,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
-			return m, tea.Quit
-		case tea.KeyEnter:
-			if len(m.questionQueue) > 0 {
-				asking := m.questionQueue[0]
-				if asking.Question != nil {
-					asking.Question.Response <- m.inputBuffer
-					asking.IsAsking = false
-					asking.Question = nil
-					m.questionQueue = m.questionQueue[1:]
-					if len(m.questionQueue) > 0 {
-						m.questionQueue[0].IsAsking = true
+		switch m.mode {
+		case modeNormal:
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyRunes:
+				if msg.String() == "n" {
+					m.mode = modeNewTicket
+					m.inputBuffer = ""
+					m.statusMsg = ""
+				}
+			}
+
+		case modeNewTicket:
+			switch msg.Type {
+			case tea.KeyCtrlC, tea.KeyEsc:
+				m.mode = modeNormal
+				m.inputBuffer = ""
+			case tea.KeyEnter:
+				ticketID := strings.ToUpper(strings.TrimSpace(m.inputBuffer))
+				if ticketID != "" {
+					m.mode = modeNormal
+					m.inputBuffer = ""
+					m.tickets = append(m.tickets, &Ticket{
+						ID:     ticketID,
+						Phase:  PhasePlanning,
+						Status: "starting...",
+						PosX:   0,
+						TargetX: 0,
+					})
+					if m.OnStartTicket != nil {
+						go m.OnStartTicket(ticketID)
 					}
 				}
-				m.inputBuffer = ""
+			case tea.KeyBackspace:
+				if len(m.inputBuffer) > 0 {
+					m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
+				}
+			default:
+				m.inputBuffer += msg.String()
 			}
-		case tea.KeyBackspace:
-			if len(m.inputBuffer) > 0 {
-				m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
-			}
-		default:
-			if len(m.questionQueue) > 0 {
+
+		case modeQuestion:
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyEnter:
+				if len(m.questionQueue) > 0 {
+					asking := m.questionQueue[0]
+					if asking.Question != nil {
+						asking.Question.Response <- m.inputBuffer
+						asking.IsAsking = false
+						asking.Question = nil
+						m.questionQueue = m.questionQueue[1:]
+						if len(m.questionQueue) > 0 {
+							m.questionQueue[0].IsAsking = true
+						}
+					}
+					m.inputBuffer = ""
+					if len(m.questionQueue) == 0 {
+						m.mode = modeNormal
+					}
+				}
+			case tea.KeyBackspace:
+				if len(m.inputBuffer) > 0 {
+					m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
+				}
+			default:
 				m.inputBuffer += msg.String()
 			}
 		}
@@ -171,6 +221,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.questionQueue = append(m.questionQueue, ticket)
 			if len(m.questionQueue) == 1 {
 				ticket.IsAsking = true
+				m.mode = modeQuestion
 			}
 		}
 
@@ -181,6 +232,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ticket.Status = msg.Status
 			ticket.TargetX = float64(msg.Phase)
 			ticket.IsMoving = true
+		}
+
+	case TicketErrorMsg:
+		m.statusMsg = fmt.Sprintf("error starting %s: %v", msg.TicketID, msg.Err)
+		for i, t := range m.tickets {
+			if t.ID == msg.TicketID {
+				m.tickets = append(m.tickets[:i], m.tickets[i+1:]...)
+				break
+			}
 		}
 	}
 
@@ -198,13 +258,15 @@ func (m Model) findTicket(id string) *Ticket {
 
 func (m Model) View() string {
 	if m.width == 0 {
-		return "로딩 중..."
+		return "loading..."
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
 		m.renderRooms(),
 		m.renderCorridor(),
 		m.renderQuestionArea(),
+		m.renderNewTicketInput(),
+		m.renderStatusBar(),
 	)
 }
 
@@ -368,4 +430,35 @@ func (m Model) renderQuestionArea() string {
 	}
 
 	return "\n" + questionBoxStyle.Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderNewTicketInput() string {
+	if m.mode != modeNewTicket {
+		return ""
+	}
+	content := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render("New ticket") +
+		"\n\n" +
+		"Ticket ID (e.g. RP-1234):\n" +
+		inputStyle.Render("> "+strings.ToUpper(m.inputBuffer)+"_") +
+		"\n\n" +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[Enter] start  [Esc] cancel")
+
+	return "\n" + questionBoxStyle.Render(content)
+}
+
+func (m Model) renderStatusBar() string {
+	var parts []string
+
+	if m.statusMsg != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(m.statusMsg))
+	}
+
+	if m.mode == modeNormal && len(m.questionQueue) == 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[n] new ticket  [ctrl+c] quit"))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(parts, "  ")
 }

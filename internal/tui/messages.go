@@ -11,3 +11,12 @@ type PhaseChangeMsg struct {
 	Phase    Phase
 	Status   string
 }
+
+type StartTicketMsg struct {
+	TicketID string
+}
+
+type TicketErrorMsg struct {
+	TicketID string
+	Err      error
+}

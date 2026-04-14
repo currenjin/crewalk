@@ -4,14 +4,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/currenjin/crewalk/internal/config"
+	"github.com/currenjin/crewalk/internal/session"
 	"github.com/currenjin/crewalk/internal/tui"
 	"github.com/currenjin/crewalk/internal/watcher"
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to get home dir: %v\n", err)
@@ -22,11 +29,18 @@ func main() {
 	w := watcher.New(projectsDir)
 	w.Start()
 
+	sessionMgr := session.NewManager(cfg)
+
 	m := tui.New()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
+	m.OnStartTicket = func(ticketID string) {
+		if err := sessionMgr.StartTicket(ticketID); err != nil {
+			p.Send(tui.TicketErrorMsg{TicketID: ticketID, Err: err})
+		}
+	}
+
 	go forwardWatcherEvents(w, p)
-	go simulateWork(p)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -42,57 +56,4 @@ func forwardWatcherEvents(w *watcher.Watcher, p *tea.Program) {
 			Status:   event.Status,
 		})
 	}
-}
-
-func simulateWork(p *tea.Program) {
-	time.Sleep(2 * time.Second)
-
-	p.Send(tui.PhaseChangeMsg{
-		TicketID: "RP-5678",
-		Phase:    tui.PhaseBranching,
-		Status:   "creating branch",
-	})
-
-	time.Sleep(3 * time.Second)
-
-	p.Send(tui.PhaseChangeMsg{
-		TicketID: "RP-5678",
-		Phase:    tui.PhaseCoding,
-		Status:   "implementing",
-	})
-
-	time.Sleep(2 * time.Second)
-
-	responseCh := make(chan string, 1)
-	p.Send(tui.AskQuestionMsg{
-		TicketID: "RP-1234",
-		Text:     "How should we create the branch?\n  [ yes ]  [ worktree ]  [ skip ]",
-		Response: responseCh,
-	})
-
-	time.Sleep(500 * time.Millisecond)
-
-	responseCh2 := make(chan string, 1)
-	p.Send(tui.AskQuestionMsg{
-		TicketID: "RP-9012",
-		Text:     "Use develop as PR base branch?\n  [ yes ]  [ no ]",
-		Response: responseCh2,
-	})
-
-	<-responseCh
-	<-responseCh2
-
-	time.Sleep(1 * time.Second)
-	p.Send(tui.PhaseChangeMsg{
-		TicketID: "RP-1234",
-		Phase:    tui.PhasePushing,
-		Status:   "creating PR",
-	})
-
-	time.Sleep(3 * time.Second)
-	p.Send(tui.PhaseChangeMsg{
-		TicketID: "RP-1234",
-		Phase:    tui.PhaseDone,
-		Status:   "done",
-	})
 }
