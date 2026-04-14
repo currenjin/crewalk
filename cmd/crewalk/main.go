@@ -6,18 +6,47 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/currenjin/crewalk/internal/ipc"
 	"github.com/currenjin/crewalk/internal/tui"
 )
 
 func main() {
+	server := ipc.NewServer()
+	if err := server.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start IPC server: %v\n", err)
+		os.Exit(1)
+	}
+	defer server.Stop()
+
 	m := tui.New()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
+	go forwardIPCEvents(server, p)
 	go simulateWork(p)
 
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "오류: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func forwardIPCEvents(server *ipc.Server, p *tea.Program) {
+	for event := range server.Events() {
+		switch event.Type {
+		case ipc.EventPhaseChange:
+			p.Send(tui.PhaseChangeMsg{
+				TicketID: event.TicketID,
+				Phase:    tui.PhaseFromString(event.Phase),
+				Status:   event.Status,
+			})
+		case ipc.EventAskQuestion:
+			responseCh := make(chan string, 1)
+			p.Send(tui.AskQuestionMsg{
+				TicketID: event.TicketID,
+				Text:     event.Text,
+				Response: responseCh,
+			})
+		}
 	}
 }
 
@@ -27,7 +56,7 @@ func simulateWork(p *tea.Program) {
 	p.Send(tui.PhaseChangeMsg{
 		TicketID: "RP-5678",
 		Phase:    tui.PhaseBranching,
-		Status:   "브랜치 생성 중",
+		Status:   "creating branch",
 	})
 
 	time.Sleep(3 * time.Second)
@@ -35,7 +64,7 @@ func simulateWork(p *tea.Program) {
 	p.Send(tui.PhaseChangeMsg{
 		TicketID: "RP-5678",
 		Phase:    tui.PhaseCoding,
-		Status:   "go 루프 중",
+		Status:   "implementing",
 	})
 
 	time.Sleep(2 * time.Second)
@@ -43,7 +72,7 @@ func simulateWork(p *tea.Program) {
 	responseCh := make(chan string, 1)
 	p.Send(tui.AskQuestionMsg{
 		TicketID: "RP-1234",
-		Text:     "브랜치를 어떻게 만들까요?\n  [ yes ]  [ worktree ]  [ skip ]",
+		Text:     "How should we create the branch?\n  [ yes ]  [ worktree ]  [ skip ]",
 		Response: responseCh,
 	})
 
@@ -52,7 +81,7 @@ func simulateWork(p *tea.Program) {
 	responseCh2 := make(chan string, 1)
 	p.Send(tui.AskQuestionMsg{
 		TicketID: "RP-9012",
-		Text:     "PR 베이스를 develop으로 할까요?\n  [ yes ]  [ no ]",
+		Text:     "Use develop as PR base branch?\n  [ yes ]  [ no ]",
 		Response: responseCh2,
 	})
 
@@ -63,13 +92,13 @@ func simulateWork(p *tea.Program) {
 	p.Send(tui.PhaseChangeMsg{
 		TicketID: "RP-1234",
 		Phase:    tui.PhasePushing,
-		Status:   "PR 생성 중",
+		Status:   "creating PR",
 	})
 
 	time.Sleep(3 * time.Second)
 	p.Send(tui.PhaseChangeMsg{
 		TicketID: "RP-1234",
 		Phase:    tui.PhaseDone,
-		Status:   "완료",
+		Status:   "done",
 	})
 }

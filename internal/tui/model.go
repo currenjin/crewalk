@@ -20,6 +20,24 @@ const (
 	PhaseDone
 )
 
+func PhaseFromString(s string) Phase {
+	switch s {
+	case "PLANNING":
+		return PhasePlanning
+	case "BRANCHING":
+		return PhaseBranching
+	case "CODING":
+		return PhaseCoding
+	case "REVIEWING":
+		return PhaseReviewing
+	case "PUSHING":
+		return PhasePushing
+	case "DONE":
+		return PhaseDone
+	}
+	return PhasePlanning
+}
+
 func (p Phase) String() string {
 	switch p {
 	case PhasePlanning:
