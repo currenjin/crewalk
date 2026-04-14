@@ -16,10 +16,15 @@ type PhaseEvent struct {
 	Status   string
 }
 
+type QuestionEvent struct {
+	TicketID string
+	Text     string
+}
+
 type jsonlEntry struct {
-	Type    string          `json:"type"`
-	Cwd     string          `json:"cwd"`
-	Message *assistantMsg   `json:"message,omitempty"`
+	Type    string        `json:"type"`
+	Cwd     string        `json:"cwd"`
+	Message *assistantMsg `json:"message,omitempty"`
 }
 
 type assistantMsg struct {
@@ -38,6 +43,7 @@ var ticketPattern = regexp.MustCompile(`(?i)((?:RP|TECH|DEV)-\d+)`)
 type Watcher struct {
 	projectsDir string
 	events      chan PhaseEvent
+	questions   chan QuestionEvent
 	offsets     map[string]int64
 }
 
@@ -45,12 +51,17 @@ func New(projectsDir string) *Watcher {
 	return &Watcher{
 		projectsDir: projectsDir,
 		events:      make(chan PhaseEvent, 100),
+		questions:   make(chan QuestionEvent, 20),
 		offsets:     make(map[string]int64),
 	}
 }
 
 func (w *Watcher) Events() <-chan PhaseEvent {
 	return w.events
+}
+
+func (w *Watcher) Questions() <-chan QuestionEvent {
+	return w.questions
 }
 
 func (w *Watcher) Start() {
@@ -125,6 +136,16 @@ func (w *Watcher) parseLine(line string) {
 		if content.Type != "tool_use" {
 			continue
 		}
+
+		if content.Name == "AskUserQuestion" {
+			text := extractQuestionText(content.Input)
+			w.questions <- QuestionEvent{
+				TicketID: ticketID,
+				Text:     text,
+			}
+			continue
+		}
+
 		phase, status := detectPhase(content.Name, content.Input)
 		if phase == "" {
 			continue
@@ -135,6 +156,20 @@ func (w *Watcher) parseLine(line string) {
 			Status:   status,
 		}
 	}
+}
+
+func extractQuestionText(raw json.RawMessage) string {
+	var input struct {
+		Question string `json:"question"`
+		Prompt   string `json:"prompt"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return "?"
+	}
+	if input.Question != "" {
+		return input.Question
+	}
+	return input.Prompt
 }
 
 func extractTicketID(cwd string) string {

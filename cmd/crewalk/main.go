@@ -40,7 +40,8 @@ func main() {
 		}
 	}
 
-	go forwardWatcherEvents(w, p)
+	go forwardPhaseEvents(w, p)
+	go forwardQuestionEvents(w, p, sessionMgr)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -48,12 +49,27 @@ func main() {
 	}
 }
 
-func forwardWatcherEvents(w *watcher.Watcher, p *tea.Program) {
+func forwardPhaseEvents(w *watcher.Watcher, p *tea.Program) {
 	for event := range w.Events() {
 		p.Send(tui.PhaseChangeMsg{
 			TicketID: event.TicketID,
 			Phase:    tui.PhaseFromString(event.Phase),
 			Status:   event.Status,
 		})
+	}
+}
+
+func forwardQuestionEvents(w *watcher.Watcher, p *tea.Program, mgr *session.Manager) {
+	for qEvent := range w.Questions() {
+		responseCh := make(chan string, 1)
+		p.Send(tui.AskQuestionMsg{
+			TicketID: qEvent.TicketID,
+			Text:     qEvent.Text,
+			Response: responseCh,
+		})
+		go func(ticketID string, ch <-chan string) {
+			answer := <-ch
+			mgr.WriteToSession(ticketID, answer+"\n")
+		}(qEvent.TicketID, responseCh)
 	}
 }
