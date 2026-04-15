@@ -121,6 +121,8 @@ args = ["--dangerously-skip-permissions"]
 
 Claude Code 세션이 작업 단계를 걸어가는 모습을 실시간으로 지켜보세요.
 
+![demo](demo/demo.gif)
+
 ## 왜 crewalk인가?
 
 여러 Claude Code 세션을 병렬로 돌리는 건 강력하지만, 눈에 보이지 않습니다. crewalk는 그걸 화면에 올려놓습니다. 각 티켓은 캐릭터가 되고, 각 워크플로우 단계는 방이 되고, 크루가 계획에서 완료까지 걷는 모습을 지켜봅니다.

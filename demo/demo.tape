@@ -3,7 +3,7 @@ Output demo/demo.gif
 Set Shell "bash"
 Set FontSize 14
 Set Width 1600
-Set Height 560
+Set Height 700
 Set Theme "Dracula"
 Set PlaybackSpeed 1.0
 Set TypingSpeed 80ms
