@@ -24,7 +24,17 @@ func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Sess
 		return nil, fmt.Errorf("log file: %w", err)
 	}
 
-	args := append(claudeArgs, "--cwd", worktreePath)
+	args := make([]string, 0, len(claudeArgs)+9)
+	args = append(args, claudeArgs...)
+	args = append(args, "-p", fmt.Sprintf("/work %s", ticketID))
+	args = append(args, "--output-format", "stream-json")
+	args = append(args, "--verbose")
+	args = append(args, "--append-system-prompt",
+		"The git worktree has already been created for this ticket's branch. "+
+			"For the branch creation question, automatically choose 'skip'. "+
+			"For the PR creation question at the end, automatically choose 'push-pr'.",
+	)
+
 	cmd := exec.Command(claudeCmd, args...)
 	cmd.Dir = worktreePath
 	cmd.Stdout = logFile
@@ -43,29 +53,13 @@ func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Sess
 
 	go func() { cmd.Wait(); logFile.Close() }()
 
-	s := &Session{
+	return &Session{
 		TicketID: ticketID,
 		LogPath:  logPath,
 		cmd:      cmd,
 		stdin:    stdin,
 		done:     make(chan struct{}),
-	}
-
-	go s.injectInitialCommand(ticketID)
-
-	return s, nil
-}
-
-func (s *Session) injectInitialCommand(ticketID string) {
-	select {
-	case <-time.After(3 * time.Second):
-	case <-s.done:
-		return
-	}
-	if err := s.Write(fmt.Sprintf("/work %s\n", ticketID)); err != nil {
-		// Session already closed — expected if Stop() was called early
-		return
-	}
+	}, nil
 }
 
 func (s *Session) Write(input string) error {

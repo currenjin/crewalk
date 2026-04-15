@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -594,6 +595,27 @@ func (m Model) renderDetail() string {
 	)
 }
 
+func friendlyToolName(name string) string {
+	if strings.HasPrefix(name, "mcp__atlassian__") {
+		action := strings.TrimPrefix(name, "mcp__atlassian__")
+		switch {
+		case strings.Contains(action, "jira_issue"):
+			return "Jira"
+		case strings.Contains(action, "confluence"):
+			return "Confluence"
+		default:
+			return "Atlassian: " + action
+		}
+	}
+	if strings.HasPrefix(name, "mcp__") {
+		parts := strings.SplitN(strings.TrimPrefix(name, "mcp__"), "__", 2)
+		if len(parts) == 2 {
+			return parts[0] + ": " + parts[1]
+		}
+	}
+	return name
+}
+
 func detailSprite(phase Phase, tick int) string {
 	if phase == PhaseDone {
 		return "🧍"
@@ -612,9 +634,118 @@ func readLastLines(path string, n int) []string {
 	if err != nil {
 		return nil
 	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	raw := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	var lines []string
+	for _, line := range raw {
+		if parsed := parseStreamJsonLine(line); parsed != "" {
+			lines = append(lines, strings.Split(parsed, "\n")...)
+		}
+	}
+	if len(lines) == 0 && len(raw) > 0 && raw[0] != "" {
+		lines = raw
+	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
 	return lines
+}
+
+func parseStreamJsonLine(line string) string {
+	if line == "" {
+		return ""
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		return line
+	}
+
+	var entryType string
+	if err := json.Unmarshal(obj["type"], &entryType); err != nil {
+		return ""
+	}
+
+	switch entryType {
+	case "assistant":
+		var msg struct {
+			Message struct {
+				Content []struct {
+					Type  string `json:"type"`
+					Text  string `json:"text"`
+					Name  string `json:"name"`
+					Input struct {
+						Command  string `json:"command"`
+						Skill    string `json:"skill"`
+						FilePath string `json:"file_path"`
+						Path     string `json:"path"`
+					} `json:"input"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			return ""
+		}
+		var parts []string
+		for _, item := range msg.Message.Content {
+			switch item.Type {
+			case "text":
+				if t := strings.TrimSpace(item.Text); t != "" {
+					parts = append(parts, t)
+				}
+			case "tool_use":
+				switch item.Name {
+				case "Bash":
+					cmd := item.Input.Command
+					if len(cmd) > 60 {
+						cmd = cmd[:60] + "..."
+					}
+					parts = append(parts, "$ "+cmd)
+				case "Skill":
+					parts = append(parts, "/"+item.Input.Skill)
+				case "Edit", "Write":
+					p := item.Input.FilePath
+					if p == "" {
+						p = item.Input.Path
+					}
+					parts = append(parts, item.Name+": "+filepath.Base(p))
+				case "Read":
+					p := item.Input.FilePath
+					if p == "" {
+						p = item.Input.Path
+					}
+					parts = append(parts, "Read: "+filepath.Base(p))
+				default:
+					parts = append(parts, friendlyToolName(item.Name))
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+
+	case "system":
+		var sys struct {
+			Subtype string `json:"subtype"`
+			Stdout  string `json:"stdout"`
+		}
+		if err := json.Unmarshal([]byte(line), &sys); err != nil {
+			return ""
+		}
+		if sys.Subtype == "hook_response" && strings.TrimSpace(sys.Stdout) != "" {
+			return strings.TrimRight(sys.Stdout, "\n")
+		}
+		return ""
+
+	case "result":
+		var res struct {
+			Result  string `json:"result"`
+			IsError bool   `json:"is_error"`
+		}
+		if err := json.Unmarshal([]byte(line), &res); err != nil {
+			return ""
+		}
+		if res.Result != "" {
+			return res.Result
+		}
+		return ""
+	}
+
+	return ""
 }
