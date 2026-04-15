@@ -35,4 +35,12 @@ else
 fi
 
 echo "Installed: $DEST"
-crewalk --help 2>/dev/null || true
+
+# Warn if an older binary from a different location shadows the new one
+EXISTING=$(command -v crewalk 2>/dev/null || true)
+if [ -n "$EXISTING" ] && [ "$EXISTING" != "$DEST" ]; then
+  echo ""
+  echo "Warning: another crewalk binary exists at $EXISTING"
+  echo "It may shadow the newly installed one. Run the uninstall script first:"
+  echo "  curl -fsSL https://raw.githubusercontent.com/currenjin/crewalk/main/uninstall.sh | sh"
+fi

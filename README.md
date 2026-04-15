@@ -41,6 +41,12 @@ Build from source (requires Go):
 go install github.com/currenjin/crewalk/cmd/crewalk@latest
 ```
 
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/currenjin/crewalk/main/uninstall.sh | sh
+```
+
 ## Usage
 
 Run from inside your git project:
@@ -148,6 +154,12 @@ CREWALK_INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/cu
 
 ```bash
 go install github.com/currenjin/crewalk/cmd/crewalk@latest
+```
+
+### 제거
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/currenjin/crewalk/main/uninstall.sh | sh
 ```
 
 ## 사용법
