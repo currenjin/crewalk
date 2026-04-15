@@ -162,7 +162,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inputBuffer = ""
 					m.tickets = append(m.tickets, &Ticket{
 						ID:     ticketID,
-						Phase:  PhasePlanning,
+						Phase:  PhaseBranching,
 						Status: "starting...",
 						PosX:   0,
 						TargetX: 0,
@@ -226,7 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AddTicketMsg:
 		m.tickets = append(m.tickets, &Ticket{
 			ID:      msg.TicketID,
-			Phase:   PhasePlanning,
+			Phase:   PhaseBranching,
 			Status:  msg.Status,
 			PosX:    0,
 			TargetX: 0,
