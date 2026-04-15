@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,15 +65,15 @@ type Question struct {
 }
 
 type Ticket struct {
-	ID          string
-	Phase       Phase
-	Status      string
-	PosX        float64
-	TargetX     float64
-	IsMoving    bool
-	WalkFrame   int
-	Question    *Question
-	IsAsking    bool
+	ID        string
+	Phase     Phase
+	Status    string
+	PosX      float64
+	TargetX   float64
+	IsMoving  bool
+	WalkFrame int
+	Question  *Question
+	IsAsking  bool
 }
 
 type tickMsg time.Time
@@ -82,6 +84,7 @@ const (
 	modeNormal inputMode = iota
 	modeNewTicket
 	modeQuestion
+	modeDetail
 )
 
 type Model struct {
@@ -93,6 +96,8 @@ type Model struct {
 	width         int
 	height        int
 	tick          int
+	selectedIdx   int
+	logLines      []string
 
 	OnStartTicket func(ticketID string)
 }
@@ -134,6 +139,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.WalkFrame = (t.WalkFrame + 1) % len(walkFrames)
 			}
 		}
+		if m.mode == modeDetail && len(m.tickets) > 0 && m.selectedIdx < len(m.tickets) {
+			m.logLines = readLastLines(ticketLogPath(m.tickets[m.selectedIdx].ID), 40)
+		}
 		return m, tickCmd()
 
 	case tea.KeyMsg:
@@ -142,11 +150,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.Type {
 			case tea.KeyCtrlC:
 				return m, tea.Quit
+			case tea.KeyTab:
+				if len(m.tickets) > 0 {
+					m.selectedIdx = (m.selectedIdx + 1) % len(m.tickets)
+				}
+			case tea.KeyEnter:
+				if len(m.tickets) > 0 {
+					if m.selectedIdx >= len(m.tickets) {
+						m.selectedIdx = 0
+					}
+					m.mode = modeDetail
+					m.logLines = readLastLines(ticketLogPath(m.tickets[m.selectedIdx].ID), 40)
+				}
 			case tea.KeyRunes:
 				if msg.String() == "n" {
 					m.mode = modeNewTicket
 					m.inputBuffer = ""
 					m.statusMsg = ""
+				}
+			}
+
+		case modeDetail:
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyEsc:
+				m.mode = modeNormal
+			case tea.KeyRunes:
+				if msg.String() == "q" {
+					m.mode = modeNormal
 				}
 			}
 
@@ -161,10 +193,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = modeNormal
 					m.inputBuffer = ""
 					m.tickets = append(m.tickets, &Ticket{
-						ID:     ticketID,
-						Phase:  PhaseBranching,
-						Status: "starting...",
-						PosX:   0,
+						ID:      ticketID,
+						Phase:   PhaseBranching,
+						Status:  "starting...",
+						PosX:    0,
 						TargetX: 0,
 					})
 					if m.OnStartTicket != nil {
@@ -212,7 +244,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AskQuestionMsg:
 		ticket := m.findTicket(msg.TicketID)
 		if ticket == nil {
-			// Ticket gone before question arrived — unblock the waiting goroutine
 			msg.Response <- ""
 			break
 		}
@@ -249,6 +280,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, t := range m.tickets {
 			if t.ID == msg.TicketID {
 				m.tickets = append(m.tickets[:i], m.tickets[i+1:]...)
+				if m.selectedIdx >= len(m.tickets) && m.selectedIdx > 0 {
+					m.selectedIdx--
+				}
 				break
 			}
 		}
@@ -269,6 +303,9 @@ func (m Model) findTicket(id string) *Ticket {
 func (m Model) View() string {
 	if m.width == 0 {
 		return "loading..."
+	}
+	if m.mode == modeDetail {
+		return m.renderDetail()
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
@@ -308,6 +345,13 @@ var (
 			Width(16).
 			Height(7)
 
+	selectedRoomStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("214")).
+				Padding(1, 2).
+				Width(16).
+				Height(7)
+
 	ticketNameStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("214")).
 			Bold(true)
@@ -332,6 +376,14 @@ var (
 
 	waitingCharStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("245"))
+
+	detailBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("69")).
+			Padding(1, 2)
+
+	logLineStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
 )
 
 func (m Model) renderHeader() string {
@@ -356,14 +408,20 @@ func (m Model) renderRooms() string {
 
 func (m Model) renderRoom(phase Phase) string {
 	var ticketsInRoom []string
+	selectedTicket := m.selectedTicket()
+
 	for _, t := range m.tickets {
 		if t.Phase == phase && !t.IsMoving && !t.IsAsking {
 			sprite := "🧑"
 			if phase == PhaseDone {
 				sprite = "✅"
 			}
+			name := ticketNameStyle.Render(t.ID)
+			if selectedTicket != nil && t.ID == selectedTicket.ID {
+				name = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("▶ " + t.ID)
+			}
 			ticketsInRoom = append(ticketsInRoom,
-				ticketNameStyle.Render(t.ID)+"\n  "+sprite+"\n"+statusStyle.Render(t.Status),
+				name+"\n  "+sprite+"\n"+statusStyle.Render(t.Status),
 			)
 		}
 	}
@@ -374,7 +432,9 @@ func (m Model) renderRoom(phase Phase) string {
 	}
 
 	style := roomStyle
-	if len(ticketsInRoom) > 0 {
+	if selectedTicket != nil && selectedTicket.Phase == phase && !selectedTicket.IsMoving {
+		style = selectedRoomStyle
+	} else if len(ticketsInRoom) > 0 {
 		style = activeRoomStyle
 	}
 	if phase == PhaseDone {
@@ -382,6 +442,13 @@ func (m Model) renderRoom(phase Phase) string {
 	}
 
 	return style.Render(content)
+}
+
+func (m Model) selectedTicket() *Ticket {
+	if len(m.tickets) == 0 || m.selectedIdx >= len(m.tickets) {
+		return nil
+	}
+	return m.tickets[m.selectedIdx]
 }
 
 func (m Model) renderCorridor() string {
@@ -460,15 +527,94 @@ func (m Model) renderStatusBar() string {
 	var parts []string
 
 	if m.statusMsg != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render(m.statusMsg))
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render(m.statusMsg))
 	}
 
 	if m.mode == modeNormal && len(m.questionQueue) == 0 {
-		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[n] new ticket  [ctrl+c] quit"))
+		hint := "[n] new ticket  [ctrl+c] quit"
+		if len(m.tickets) > 0 {
+			hint = "[n] new ticket  [tab] select  [enter] enter room  [ctrl+c] quit"
+		}
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(hint))
 	}
 
 	if len(parts) == 0 {
 		return ""
 	}
 	return "\n" + strings.Join(parts, "  ")
+}
+
+func (m Model) renderDetail() string {
+	if len(m.tickets) == 0 || m.selectedIdx >= len(m.tickets) {
+		m.mode = modeNormal
+		return ""
+	}
+	t := m.tickets[m.selectedIdx]
+
+	sprite := detailSprite(t.Phase, m.tick)
+
+	header := lipgloss.JoinHorizontal(lipgloss.Center,
+		sprite+"  ",
+		ticketNameStyle.Render(t.ID),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  ·  "),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("69")).Bold(true).Render(t.Phase.String()),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true).Render("  "+t.Status),
+	)
+
+	var logText string
+	if len(m.logLines) == 0 {
+		logText = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true).Render("no output yet...")
+	} else {
+		colored := make([]string, len(m.logLines))
+		for i, l := range m.logLines {
+			colored[i] = logLineStyle.Render(l)
+		}
+		logText = strings.Join(colored, "\n")
+	}
+
+	innerH := m.height - 8
+	if innerH < 5 {
+		innerH = 5
+	}
+
+	content := header + "\n\n" + logText
+
+	box := detailBoxStyle.
+		Width(m.width - 4).
+		Height(innerH).
+		Render(content)
+
+	statusBar := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).
+		Render("[q / esc] exit room  [ctrl+c] quit")
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		m.renderHeader(),
+		"\n"+box,
+		"\n"+statusBar,
+	)
+}
+
+func detailSprite(phase Phase, tick int) string {
+	if phase == PhaseDone {
+		return "🧍"
+	}
+	frames := []string{"🚶", "🚶‍", "🧍", "🧍"}
+	return frames[tick%len(frames)]
+}
+
+func ticketLogPath(ticketID string) string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".crewalk", "logs", ticketID+".log")
+}
+
+func readLastLines(path string, n int) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
 }
