@@ -1,5 +1,13 @@
 # crewalk
 
+[English](#crewalk-1) | [한국어](#crewalk-한국어)
+
+---
+
+<a name="crewalk-1"></a>
+
+# crewalk (English)
+
 TUI dashboard that visualizes Claude Code work sessions as characters walking through workflow stages.
 
 Each ticket becomes a character. Each workflow stage is a room. You watch your crew walk from planning to done.
