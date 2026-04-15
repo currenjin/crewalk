@@ -12,21 +12,7 @@ TUI dashboard that visualizes Claude Code work sessions as characters walking th
 
 Each ticket becomes a character. Each workflow stage is a room. You watch your crew walk from planning to done.
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🏢 ROOUTY WORK DASHBOARD                                    2026-04-15 10:23 │
-╰──────────────────────────────────────────────────────────────────────────────╯
-╭──────────╮╭──────────╮╭──────────╮╭──────────╮╭──────────╮╭──────────╮
-│ PLANNING ││BRANCHING ││  CODING  ││REVIEWING ││ PUSH/PR  ││   DONE   │
-│          ││          ││          ││          ││          ││          │
-│          ││ RP-1234  ││          ││ RP-5678  ││          ││          │
-│          ││   🧑     ││          ││   🧑     ││          ││          │
-│          ││ working..││          ││ reviewing││          ││          │
-╰──────────╯╰──────────╯╰──────────╯╰──────────╯╰──────────╯╰──────────╯
-          RP-9999🚶
-
-[n] new ticket  [ctrl+c] quit
-```
+![demo](demo.gif)
 
 ## Prerequisites
 
@@ -130,6 +116,8 @@ args = ["--dangerously-skip-permissions"]
 Claude Code 작업 세션을 캐릭터가 워크플로우 단계를 걸어가는 모습으로 시각화하는 TUI 대시보드입니다.
 
 각 티켓은 캐릭터가 되고, 각 워크플로우 단계는 방이 됩니다. 계획에서 완료까지 크루가 걷는 모습을 지켜보세요.
+
+![demo](demo.gif)
 
 ## 사전 요구사항
 

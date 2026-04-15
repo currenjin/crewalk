@@ -16,6 +16,11 @@ type StartTicketMsg struct {
 	TicketID string
 }
 
+type AddTicketMsg struct {
+	TicketID string
+	Status   string
+}
+
 type TicketErrorMsg struct {
 	TicketID string
 	Err      error

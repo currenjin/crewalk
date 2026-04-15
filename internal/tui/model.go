@@ -228,6 +228,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeQuestion
 		}
 
+	case AddTicketMsg:
+		m.tickets = append(m.tickets, &Ticket{
+			ID:      msg.TicketID,
+			Phase:   PhasePlanning,
+			Status:  msg.Status,
+			PosX:    0,
+			TargetX: 0,
+		})
+
 	case PhaseChangeMsg:
 		ticket := m.findTicket(msg.TicketID)
 		if ticket != nil {
