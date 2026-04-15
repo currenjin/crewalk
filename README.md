@@ -1,18 +1,22 @@
 # crewalk
 
-[English](#crewalk-1) | [한국어](#crewalk-한국어)
+Watch your Claude Code sessions walk through work stages — in real time.
+
+[![Release](https://img.shields.io/github/v/release/currenjin/crewalk)](https://github.com/currenjin/crewalk/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/currenjin/crewalk)](https://go.dev/)
+[![License](https://img.shields.io/github/license/currenjin/crewalk)](LICENSE)
+
+[English](#english) | [한국어](#한국어)
+
+![demo](demo/demo.gif)
 
 ---
 
-<a name="crewalk-1"></a>
+<a name="english"></a>
 
-# crewalk (English)
+## Why crewalk?
 
-TUI dashboard that visualizes Claude Code work sessions as characters walking through workflow stages.
-
-Each ticket becomes a character. Each workflow stage is a room. You watch your crew walk from planning to done.
-
-![demo](demo.gif)
+Running multiple Claude Code sessions in parallel is powerful — but invisible. crewalk puts them on screen: each ticket becomes a character, each workflow stage becomes a room, and you watch your crew walk from planning to done.
 
 ## Prerequisites
 
@@ -111,13 +115,15 @@ args = ["--dangerously-skip-permissions"]
 
 ---
 
+<a name="한국어"></a>
+
 # crewalk (한국어)
 
-Claude Code 작업 세션을 캐릭터가 워크플로우 단계를 걸어가는 모습으로 시각화하는 TUI 대시보드입니다.
+Claude Code 세션이 작업 단계를 걸어가는 모습을 실시간으로 지켜보세요.
 
-각 티켓은 캐릭터가 되고, 각 워크플로우 단계는 방이 됩니다. 계획에서 완료까지 크루가 걷는 모습을 지켜보세요.
+## 왜 crewalk인가?
 
-![demo](demo.gif)
+여러 Claude Code 세션을 병렬로 돌리는 건 강력하지만, 눈에 보이지 않습니다. crewalk는 그걸 화면에 올려놓습니다. 각 티켓은 캐릭터가 되고, 각 워크플로우 단계는 방이 되고, 크루가 계획에서 완료까지 걷는 모습을 지켜봅니다.
 
 ## 사전 요구사항
 
