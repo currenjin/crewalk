@@ -13,4 +13,11 @@ Type "cd /Users/currenjin/Documents/personal/repositories/crewalk && ./crewalk -
 Enter
 Sleep 500ms
 Show
-Sleep 19.5s
+
+Sleep 4.5s
+Tab
+Sleep 400ms
+Enter
+Sleep 4s
+Type "q"
+Sleep 10s
