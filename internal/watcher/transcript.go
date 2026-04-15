@@ -217,14 +217,12 @@ func detectPhase(toolName string, toolInput json.RawMessage) (phase, status stri
 		}
 		if err := json.Unmarshal(toolInput, &input); err == nil {
 			switch input.Skill {
-			case "jira-to-plan":
-				return "PLANNING", "generating plan"
 			case "start-branch":
 				return "BRANCHING", "creating branch"
+			case "jira-to-plan":
+				return "PLANNING", "generating plan"
 			case "augmented-coding":
 				return "CODING", "implementing"
-			case "review":
-				return "REVIEWING", "reviewing"
 			case "push-pr":
 				return "PUSHING", "creating PR"
 			}

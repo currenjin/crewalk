@@ -12,42 +12,37 @@ import (
 type Phase int
 
 const (
-	PhasePlanning Phase = iota
-	PhaseBranching
+	PhaseBranching Phase = iota
+	PhasePlanning
 	PhaseCoding
-	PhaseReviewing
 	PhasePushing
 	PhaseDone
 )
 
 func PhaseFromString(s string) Phase {
 	switch s {
-	case "PLANNING":
-		return PhasePlanning
 	case "BRANCHING":
 		return PhaseBranching
+	case "PLANNING":
+		return PhasePlanning
 	case "CODING":
 		return PhaseCoding
-	case "REVIEWING":
-		return PhaseReviewing
 	case "PUSHING":
 		return PhasePushing
 	case "DONE":
 		return PhaseDone
 	}
-	return PhasePlanning
+	return PhaseBranching
 }
 
 func (p Phase) String() string {
 	switch p {
-	case PhasePlanning:
-		return "PLANNING"
 	case PhaseBranching:
 		return "BRANCHING"
+	case PhasePlanning:
+		return "PLANNING"
 	case PhaseCoding:
 		return "CODING"
-	case PhaseReviewing:
-		return "REVIEWING"
 	case PhasePushing:
 		return "PUSH/PR"
 	case PhaseDone:
@@ -57,7 +52,7 @@ func (p Phase) String() string {
 }
 
 var phaseOrder = []Phase{
-	PhasePlanning, PhaseBranching, PhaseCoding, PhaseReviewing, PhasePushing, PhaseDone,
+	PhaseBranching, PhasePlanning, PhaseCoding, PhasePushing, PhaseDone,
 }
 
 var walkFrames = []string{"🚶", "🚶", "🧍", "🧍"}

@@ -17,18 +17,16 @@ type demoStep struct {
 }
 
 var demoScript = []demoStep{
-	{delay: 800 * time.Millisecond, ticketID: "RP-1234", add: true, status: "reading ticket..."},
-	{delay: 1800 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhaseBranching, status: "creating branch..."},
-	{delay: 1500 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhaseCoding, status: "implementing..."},
-	{delay: 1200 * time.Millisecond, ticketID: "RP-5678", add: true, status: "reading ticket..."},
-	{delay: 2000 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhaseReviewing, status: "running tests..."},
-	{delay: 1000 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhaseBranching, status: "creating branch..."},
-	{delay: 1500 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhasePushing, status: "opening PR..."},
+	{delay: 800 * time.Millisecond, ticketID: "RP-1234", add: true, status: "starting..."},
+	{delay: 1500 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhasePlanning, status: "generating plan..."},
+	{delay: 1800 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhaseCoding, status: "implementing..."},
+	{delay: 1200 * time.Millisecond, ticketID: "RP-5678", add: true, status: "starting..."},
+	{delay: 1000 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhasePlanning, status: "generating plan..."},
+	{delay: 2000 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhasePushing, status: "opening PR..."},
 	{delay: 800 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhaseCoding, status: "implementing..."},
 	{delay: 1200 * time.Millisecond, ticketID: "RP-1234", phase: tui.PhaseDone, status: "done"},
-	{delay: 1500 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhaseReviewing, status: "running tests...", question: "Should I squash commits before merging?"},
-	{delay: 3000 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhasePushing, status: "opening PR..."},
-	{delay: 1500 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhaseDone, status: "done"},
+	{delay: 1500 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhasePushing, status: "opening PR...", question: "Should I squash commits before merging?"},
+	{delay: 3000 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhaseDone, status: "done"},
 }
 
 func runDemo(p *tea.Program) {
