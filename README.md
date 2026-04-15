@@ -29,6 +29,18 @@ Each ticket becomes a character. Each workflow stage is a room. You watch your c
 ## Installation
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/currenjin/crewalk/main/install.sh | sh
+```
+
+설치 디렉토리를 바꾸고 싶다면:
+
+```bash
+CREWALK_INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/currenjin/crewalk/main/install.sh | sh
+```
+
+Go가 설치되어 있다면 소스에서 직접 빌드할 수도 있습니다:
+
+```bash
 go install github.com/currenjin/crewalk/cmd/crewalk@latest
 ```
 
