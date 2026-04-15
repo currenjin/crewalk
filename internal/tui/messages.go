@@ -25,3 +25,7 @@ type TicketErrorMsg struct {
 	TicketID string
 	Err      error
 }
+
+type StatusMsg struct {
+	Text string
+}

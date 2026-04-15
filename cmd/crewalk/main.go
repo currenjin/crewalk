@@ -44,9 +44,12 @@ func main() {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	m.OnStartTicket = func(ticketID string) {
-		if err := sessionMgr.StartTicket(ticketID); err != nil {
+		logPath, err := sessionMgr.StartTicket(ticketID)
+		if err != nil {
 			p.Send(tui.TicketErrorMsg{TicketID: ticketID, Err: err})
+			return
 		}
+		p.Send(tui.StatusMsg{Text: "log: tail -f " + logPath})
 	}
 
 	go forwardPhaseEvents(ctx, w, p)

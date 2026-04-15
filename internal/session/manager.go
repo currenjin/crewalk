@@ -24,30 +24,30 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 }
 
-func (m *Manager) StartTicket(ticketID string) error {
+func (m *Manager) StartTicket(ticketID string) (logPath string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if _, exists := m.sessions[ticketID]; exists {
-		return fmt.Errorf("ticket %s is already running", ticketID)
+		return "", fmt.Errorf("ticket %s is already running", ticketID)
 	}
 
 	worktreePath := m.cfg.WorktreePath(ticketID)
 
 	if err := m.git.CreateWorktree(ticketID, worktreePath); err != nil {
-		return fmt.Errorf("create worktree: %w", err)
+		return "", fmt.Errorf("create worktree: %w", err)
 	}
 
 	s, err := Start(ticketID, worktreePath, m.cfg.Claude.Command, m.cfg.Claude.Args)
 	if err != nil {
 		m.git.RemoveWorktree(worktreePath)
-		return fmt.Errorf("start session: %w", err)
+		return "", fmt.Errorf("start session: %w", err)
 	}
 
 	m.sessions[ticketID] = s
 	go m.waitAndCleanup(ticketID, worktreePath, s)
 
-	return nil
+	return s.LogPath, nil
 }
 
 func (m *Manager) WriteToSession(ticketID, input string) error {

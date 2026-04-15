@@ -241,6 +241,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ticket.IsMoving = true
 		}
 
+	case StatusMsg:
+		m.statusMsg = msg.Text
+
 	case TicketErrorMsg:
 		m.statusMsg = fmt.Sprintf("error starting %s: %v", msg.TicketID, msg.Err)
 		for i, t := range m.tickets {
@@ -333,7 +336,7 @@ var (
 
 func (m Model) renderHeader() string {
 	now := time.Now().Format("2006-01-02 15:04:05")
-	title := "🏢 ROOUTY WORK DASHBOARD"
+	title := "🚶 CREWALK"
 	padding := m.width - len(title) - len(now) - 4
 	if padding < 1 {
 		padding = 1
