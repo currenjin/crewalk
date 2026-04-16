@@ -51,6 +51,10 @@ func main() {
 		p.Send(tui.StatusMsg{Text: ticketID + " started"})
 	}
 
+	m.OnRemoveTicket = func(ticketID string) {
+		sessionMgr.StopTicket(ticketID)
+	}
+
 	p = tea.NewProgram(m, tea.WithAltScreen())
 
 	go forwardPhaseEvents(ctx, w, p)

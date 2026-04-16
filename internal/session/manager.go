@@ -68,3 +68,17 @@ func (m *Manager) WriteTextToSession(ticketID, text string) error {
 	}
 	return s.WriteText(text)
 }
+
+func (m *Manager) StopTicket(ticketID string) {
+	m.mu.Lock()
+	s, exists := m.sessions[ticketID]
+	delete(m.sessions, ticketID)
+	m.mu.Unlock()
+
+	if exists {
+		s.Stop()
+	}
+
+	worktreePath := m.cfg.WorktreePath(ticketID)
+	m.git.RemoveWorktree(worktreePath)
+}

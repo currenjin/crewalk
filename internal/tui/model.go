@@ -88,6 +88,7 @@ const (
 	modeNewTicket
 	modeQuestion
 	modeDetail
+	modeConfirmRemove
 )
 
 type Model struct {
@@ -101,10 +102,12 @@ type Model struct {
 	tick             int
 	selectedIdx      int
 	logLines         []string
-	questionSelected int  // highlighted option index
-	questionTextMode bool // true when typing custom text
+	questionSelected  int  // highlighted option index
+	questionTextMode  bool // true when typing custom text
+	confirmRemoveIdx  int
 
-	OnStartTicket func(ticketID string)
+	OnStartTicket  func(ticketID string)
+	OnRemoveTicket func(ticketID string)
 }
 
 func New() Model {
@@ -174,10 +177,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case tea.KeyRunes:
-				if msg.String() == "n" {
+				switch msg.String() {
+				case "n":
 					m.mode = modeNewTicket
 					m.inputBuffer = ""
 					m.statusMsg = ""
+				case "d":
+					if len(m.tickets) > 0 && m.selectedIdx < len(m.tickets) {
+						m.confirmRemoveIdx = m.selectedIdx
+						m.mode = modeConfirmRemove
+					}
 				}
 			}
 
@@ -284,6 +293,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inputBuffer += msg.String()
 				}
 			}
+		case modeConfirmRemove:
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyEsc:
+				m.mode = modeNormal
+			case tea.KeyEnter:
+				m.selectedIdx = m.confirmRemoveIdx
+				m.removeSelectedTicket()
+				m.mode = modeNormal
+			case tea.KeyRunes:
+				switch msg.String() {
+				case "y", "Y":
+					m.selectedIdx = m.confirmRemoveIdx
+					m.removeSelectedTicket()
+					m.mode = modeNormal
+				case "n", "N":
+					m.mode = modeNormal
+				}
+			}
 		}
 
 	case AskQuestionMsg:
@@ -341,6 +370,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) removeSelectedTicket() {
+	t := m.tickets[m.selectedIdx]
+
+	for i, qt := range m.questionQueue {
+		if qt.ID == t.ID {
+			if qt.Question != nil {
+				qt.Question.Response <- QuestionResponse{OptionIndex: -1, Text: ""}
+			}
+			m.questionQueue = append(m.questionQueue[:i], m.questionQueue[i+1:]...)
+			break
+		}
+	}
+
+	m.tickets = append(m.tickets[:m.selectedIdx], m.tickets[m.selectedIdx+1:]...)
+	if m.selectedIdx >= len(m.tickets) && m.selectedIdx > 0 {
+		m.selectedIdx--
+	}
+	if len(m.questionQueue) == 0 && m.mode == modeQuestion {
+		m.mode = modeNormal
+	}
+
+	if m.OnRemoveTicket != nil {
+		go m.OnRemoveTicket(t.ID)
+	}
+}
+
 func (m Model) findTicket(id string) *Ticket {
 	for _, t := range m.tickets {
 		if t.ID == id {
@@ -362,6 +417,7 @@ func (m Model) View() string {
 		m.renderRooms(),
 		m.renderCorridor(),
 		m.renderQuestionArea(),
+		m.renderConfirmRemove(),
 		m.renderNewTicketInput(),
 		m.renderStatusBar(),
 	)
@@ -572,6 +628,23 @@ func (m Model) renderQuestionArea() string {
 	return "\n" + inputBoxStyle.Render(strings.Join(lines, "\n"))
 }
 
+func (m Model) renderConfirmRemove() string {
+	if m.mode != modeConfirmRemove {
+		return ""
+	}
+	if m.confirmRemoveIdx >= len(m.tickets) {
+		return ""
+	}
+	t := m.tickets[m.confirmRemoveIdx]
+	content := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")).Render("Remove ticket") +
+		"\n\n" +
+		fmt.Sprintf("티켓 %s을 제거할까요? tmux 세션과 worktree가 삭제됩니다.\n", ticketNameStyle.Render(t.ID)) +
+		"\n" +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[y / Enter] 제거  [n / Esc] 취소")
+
+	return "\n" + inputBoxStyle.Render(content)
+}
+
 func (m Model) renderNewTicketInput() string {
 	if m.mode != modeNewTicket {
 		return ""
@@ -596,7 +669,7 @@ func (m Model) renderStatusBar() string {
 	if m.mode == modeNormal && len(m.questionQueue) == 0 {
 		hint := "[n] new ticket  [ctrl+c] quit"
 		if len(m.tickets) > 0 {
-			hint = "[n] new ticket  [tab] select  [enter] detail  [ctrl+c] quit"
+			hint = "[n] new ticket  [tab] select  [enter] detail  [d] remove  [ctrl+c] quit"
 		}
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(hint))
 	}
