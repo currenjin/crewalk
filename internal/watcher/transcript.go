@@ -3,6 +3,7 @@ package watcher
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,23 +46,25 @@ type contentItem struct {
 var ticketPattern = regexp.MustCompile(`(?i)((?:RP|TECH|DEV)-\d+)`)
 
 type Watcher struct {
-	projectsDir string
-	events      chan PhaseEvent
-	questions   chan QuestionEvent
-	offsets     map[string]int64
-	fileTickets map[string]string // JSONL path → last known ticketID
-	mu          sync.Mutex
-	stop        chan struct{}
+	projectsDir  string
+	events       chan PhaseEvent
+	questions    chan QuestionEvent
+	offsets      map[string]int64
+	fileTickets  map[string]string // JSONL path → last known ticketID
+	lastQuestion map[string]string // ticketID → last question text (dedup)
+	mu           sync.Mutex
+	stop         chan struct{}
 }
 
 func New(projectsDir string) *Watcher {
 	return &Watcher{
-		projectsDir: projectsDir,
-		events:      make(chan PhaseEvent, 100),
-		questions:   make(chan QuestionEvent, 20),
-		offsets:     make(map[string]int64),
-		fileTickets: make(map[string]string),
-		stop:        make(chan struct{}),
+		projectsDir:  projectsDir,
+		events:       make(chan PhaseEvent, 100),
+		questions:    make(chan QuestionEvent, 20),
+		offsets:      make(map[string]int64),
+		fileTickets:  make(map[string]string),
+		lastQuestion: make(map[string]string),
+		stop:         make(chan struct{}),
 	}
 }
 
@@ -144,8 +147,15 @@ func (w *Watcher) scanFile(path string) {
 		w.parseLine(path, scanner.Text())
 	}
 
+	// 스캔 완료 후 실제로 읽은 위치를 offset으로 저장.
+	// info.Size()는 Stat 시점의 크기이므로 스캔 도중 파일이 커지면
+	// 다음 poll에서 같은 내용을 다시 읽게 된다.
+	actualPos, err := f.Seek(0, io.SeekCurrent)
+	if err != nil || actualPos < info.Size() {
+		actualPos = info.Size()
+	}
 	w.mu.Lock()
-	w.offsets[path] = info.Size()
+	w.offsets[path] = actualPos
 	w.mu.Unlock()
 }
 
@@ -188,6 +198,15 @@ func (w *Watcher) parseLine(path, line string) {
 
 		if content.Name == "AskUserQuestion" {
 			text, options := extractQuestion(content.Input)
+			w.mu.Lock()
+			dup := w.lastQuestion[ticketID] == text
+			if !dup {
+				w.lastQuestion[ticketID] = text
+			}
+			w.mu.Unlock()
+			if dup {
+				continue
+			}
 			select {
 			case w.questions <- QuestionEvent{TicketID: ticketID, Text: text, Options: options}:
 			case <-w.stop:
