@@ -40,9 +40,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	m := tui.New()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	var p *tea.Program
 
+	m := tui.New()
 	m.OnStartTicket = func(ticketID string) {
 		logPath, err := sessionMgr.StartTicket(ticketID)
 		if err != nil {
@@ -51,6 +51,8 @@ func main() {
 		}
 		p.Send(tui.StatusMsg{Text: "log: tail -f " + logPath})
 	}
+
+	p = tea.NewProgram(m, tea.WithAltScreen())
 
 	go forwardPhaseEvents(ctx, w, p)
 	go forwardQuestionEvents(ctx, w, p, sessionMgr)
