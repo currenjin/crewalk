@@ -81,4 +81,5 @@ func (m *Manager) StopTicket(ticketID string) {
 
 	worktreePath := m.cfg.WorktreePath(ticketID)
 	m.git.RemoveWorktree(worktreePath)
+	m.git.DeleteBranch(ticketID)
 }

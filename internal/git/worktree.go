@@ -39,3 +39,14 @@ func (m *Manager) RemoveWorktree(worktreePath string) error {
 	}
 	return nil
 }
+
+func (m *Manager) DeleteBranch(ticketID string) error {
+	branchName := fmt.Sprintf("feature/%s", ticketID)
+	cmd := exec.Command("git", "-C", m.projectPath,
+		"branch", "-D", branchName,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch -D: %w\n%s", err, out)
+	}
+	return nil
+}
