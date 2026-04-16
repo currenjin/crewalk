@@ -341,7 +341,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PhaseChangeMsg:
 		ticket := m.findTicket(msg.TicketID)
-		if ticket != nil {
+		if ticket != nil && msg.Phase >= ticket.Phase {
 			ticket.Phase = msg.Phase
 			ticket.Status = msg.Status
 			ticket.TargetX = float64(msg.Phase)
@@ -349,6 +349,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.JSONLPath != "" {
 				ticket.JSONLPath = msg.JSONLPath
 			}
+		} else if ticket != nil && msg.JSONLPath != "" {
+			ticket.JSONLPath = msg.JSONLPath
 		}
 
 	case StatusMsg:
