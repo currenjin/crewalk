@@ -60,6 +60,12 @@ var phaseOrder = []Phase{
 
 var walkFrames = []string{"🚶", "🚶", "🧍", "🧍"}
 
+type Question struct {
+	Text     string
+	Options  []string
+	Response chan QuestionResponse
+}
+
 type Ticket struct {
 	ID        string
 	Phase     Phase
@@ -69,6 +75,8 @@ type Ticket struct {
 	IsMoving  bool
 	WalkFrame int
 	JSONLPath string
+	Question  *Question
+	IsAsking  bool
 }
 
 type tickMsg time.Time
@@ -78,19 +86,23 @@ type inputMode int
 const (
 	modeNormal inputMode = iota
 	modeNewTicket
+	modeQuestion
 	modeDetail
 )
 
 type Model struct {
-	tickets     []*Ticket
-	inputBuffer string
-	mode        inputMode
-	statusMsg   string
-	width       int
-	height      int
-	tick        int
-	selectedIdx int
-	logLines    []string
+	tickets          []*Ticket
+	questionQueue    []*Ticket
+	inputBuffer      string
+	mode             inputMode
+	statusMsg        string
+	width            int
+	height           int
+	tick             int
+	selectedIdx      int
+	logLines         []string
+	questionSelected int  // highlighted option index
+	questionTextMode bool // true when typing custom text
 
 	OnStartTicket func(ticketID string)
 }
@@ -209,6 +221,84 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.inputBuffer += msg.String()
 			}
+
+		case modeQuestion:
+			if len(m.questionQueue) == 0 {
+				m.mode = modeNormal
+				break
+			}
+			asking := m.questionQueue[0]
+			hasOptions := asking.Question != nil && len(asking.Question.Options) > 0
+
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyEsc:
+				if m.questionTextMode {
+					m.questionTextMode = false
+					m.inputBuffer = ""
+				}
+			case tea.KeyUp:
+				if !m.questionTextMode && hasOptions && m.questionSelected > 0 {
+					m.questionSelected--
+				}
+			case tea.KeyDown:
+				if !m.questionTextMode && hasOptions && m.questionSelected < len(asking.Question.Options)-1 {
+					m.questionSelected++
+				}
+			case tea.KeyEnter:
+				if asking.Question != nil {
+					var resp QuestionResponse
+					if m.questionTextMode || !hasOptions {
+						resp = QuestionResponse{OptionIndex: -1, Text: m.inputBuffer}
+					} else {
+						resp = QuestionResponse{OptionIndex: m.questionSelected, Text: asking.Question.Options[m.questionSelected]}
+					}
+					asking.Question.Response <- resp
+					asking.IsAsking = false
+					asking.Question = nil
+					m.questionQueue = m.questionQueue[1:]
+					m.inputBuffer = ""
+					m.questionSelected = 0
+					m.questionTextMode = false
+					if len(m.questionQueue) > 0 {
+						m.questionQueue[0].IsAsking = true
+					} else {
+						m.mode = modeNormal
+					}
+				}
+			case tea.KeyBackspace:
+				if m.questionTextMode && len(m.inputBuffer) > 0 {
+					m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
+				}
+			case tea.KeyTab:
+				if hasOptions {
+					m.questionTextMode = !m.questionTextMode
+					m.inputBuffer = ""
+				}
+			default:
+				if hasOptions && !m.questionTextMode {
+					m.questionTextMode = true
+					m.inputBuffer = msg.String()
+				} else {
+					m.inputBuffer += msg.String()
+				}
+			}
+		}
+
+	case AskQuestionMsg:
+		ticket := m.findTicket(msg.TicketID)
+		if ticket == nil {
+			msg.Response <- QuestionResponse{OptionIndex: 0}
+			break
+		}
+		ticket.Question = &Question{Text: msg.Text, Options: msg.Options, Response: msg.Response}
+		ticket.IsAsking = true
+		m.questionQueue = append(m.questionQueue, ticket)
+		if len(m.questionQueue) == 1 {
+			m.mode = modeQuestion
+			m.questionSelected = 0
+			m.questionTextMode = false
 		}
 
 	case AddTicketMsg:
@@ -271,6 +361,7 @@ func (m Model) View() string {
 		m.renderHeader(),
 		m.renderRooms(),
 		m.renderCorridor(),
+		m.renderQuestionArea(),
 		m.renderNewTicketInput(),
 		m.renderStatusBar(),
 	)
@@ -367,7 +458,7 @@ func (m Model) renderRoom(phase Phase) string {
 	selectedTicket := m.selectedTicket()
 
 	for _, t := range m.tickets {
-		if t.Phase == phase && !t.IsMoving {
+		if t.Phase == phase && !t.IsMoving && !t.IsAsking {
 			sprite := "🧑"
 			if phase == PhaseDone {
 				sprite = "✅"
@@ -435,6 +526,52 @@ func (m Model) renderCorridor() string {
 	return corridorStyle.Render(corridor)
 }
 
+func (m Model) renderQuestionArea() string {
+	if len(m.questionQueue) == 0 {
+		return ""
+	}
+
+	asking := m.questionQueue[0]
+	if asking.Question == nil {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("🧑 %s", ticketNameStyle.Render(asking.ID)))
+	lines = append(lines, "")
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Render("? "+asking.Question.Text))
+	lines = append(lines, "")
+
+	if len(asking.Question.Options) > 0 && !m.questionTextMode {
+		for i, opt := range asking.Question.Options {
+			if i == m.questionSelected {
+				lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("❯ "+opt))
+			} else {
+				lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  "+opt))
+			}
+		}
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[↑↓] 이동  [Enter] 선택  [Tab] 직접입력"))
+	} else {
+		lines = append(lines, inputStyle.Render("> "+m.inputBuffer+"_"))
+		lines = append(lines, "")
+		if len(asking.Question.Options) > 0 {
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[Enter] 전송  [Tab] 목록으로"))
+		} else {
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[Enter] 전송"))
+		}
+	}
+
+	if len(m.questionQueue) > 1 {
+		waiting := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
+			fmt.Sprintf("  (대기 중: %d개)", len(m.questionQueue)-1),
+		)
+		lines = append(lines, waiting)
+	}
+
+	return "\n" + inputBoxStyle.Render(strings.Join(lines, "\n"))
+}
+
 func (m Model) renderNewTicketInput() string {
 	if m.mode != modeNewTicket {
 		return ""
@@ -456,7 +593,7 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render(m.statusMsg))
 	}
 
-	if m.mode == modeNormal {
+	if m.mode == modeNormal && len(m.questionQueue) == 0 {
 		hint := "[n] new ticket  [ctrl+c] quit"
 		if len(m.tickets) > 0 {
 			hint = "[n] new ticket  [tab] select  [enter] detail  [ctrl+c] quit"

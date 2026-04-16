@@ -18,6 +18,12 @@ type PhaseEvent struct {
 	JSONLPath string
 }
 
+type QuestionEvent struct {
+	TicketID string
+	Text     string
+	Options  []string
+}
+
 type jsonlEntry struct {
 	Type    string        `json:"type"`
 	Cwd     string        `json:"cwd"`
@@ -41,6 +47,7 @@ var ticketPattern = regexp.MustCompile(`(?i)((?:RP|TECH|DEV)-\d+)`)
 type Watcher struct {
 	projectsDir string
 	events      chan PhaseEvent
+	questions   chan QuestionEvent
 	offsets     map[string]int64
 	fileTickets map[string]string // JSONL path → last known ticketID
 	mu          sync.Mutex
@@ -51,6 +58,7 @@ func New(projectsDir string) *Watcher {
 	return &Watcher{
 		projectsDir: projectsDir,
 		events:      make(chan PhaseEvent, 100),
+		questions:   make(chan QuestionEvent, 20),
 		offsets:     make(map[string]int64),
 		fileTickets: make(map[string]string),
 		stop:        make(chan struct{}),
@@ -59,6 +67,10 @@ func New(projectsDir string) *Watcher {
 
 func (w *Watcher) Events() <-chan PhaseEvent {
 	return w.events
+}
+
+func (w *Watcher) Questions() <-chan QuestionEvent {
+	return w.questions
 }
 
 func (w *Watcher) Start() {
@@ -73,6 +85,7 @@ func (w *Watcher) poll() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	defer close(w.events)
+	defer close(w.questions)
 
 	for {
 		select {
@@ -173,6 +186,16 @@ func (w *Watcher) parseLine(path, line string) {
 			continue
 		}
 
+		if content.Name == "AskUserQuestion" {
+			text, options := extractQuestion(content.Input)
+			select {
+			case w.questions <- QuestionEvent{TicketID: ticketID, Text: text, Options: options}:
+			case <-w.stop:
+				return
+			}
+			continue
+		}
+
 		phase, status := detectPhase(content.Name, content.Input)
 		if phase == "" {
 			continue
@@ -183,6 +206,41 @@ func (w *Watcher) parseLine(path, line string) {
 			return
 		}
 	}
+}
+
+func extractQuestion(raw json.RawMessage) (text string, options []string) {
+	var input struct {
+		Question  string `json:"question"`
+		Prompt    string `json:"prompt"`
+		Questions []struct {
+			Question string `json:"question"`
+			Options  []struct {
+				Label       string `json:"label"`
+				Description string `json:"description"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return "?", nil
+	}
+
+	if len(input.Questions) > 0 {
+		q := input.Questions[0]
+		text = q.Question
+		for _, opt := range q.Options {
+			label := opt.Label
+			if opt.Description != "" {
+				label += "  " + opt.Description
+			}
+			options = append(options, label)
+		}
+		return text, options
+	}
+
+	if input.Question != "" {
+		return input.Question, nil
+	}
+	return input.Prompt, nil
 }
 
 func extractTicketID(cwd string) string {
