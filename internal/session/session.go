@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +13,6 @@ type Session struct {
 	TicketID string
 	LogPath  string
 	cmd      *exec.Cmd
-	stdin    io.WriteCloser
 	done     chan struct{}
 }
 
@@ -35,36 +33,36 @@ func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Sess
 			"For the PR creation question at the end, automatically choose 'push-pr'.",
 	)
 
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		logFile.Close()
+		return nil, fmt.Errorf("open devnull: %w", err)
+	}
+
 	cmd := exec.Command(claudeCmd, args...)
 	cmd.Dir = worktreePath
+	cmd.Stdin = devNull
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		logFile.Close()
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-
 	if err := cmd.Start(); err != nil {
+		devNull.Close()
 		logFile.Close()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 
-	go func() { cmd.Wait(); logFile.Close() }()
+	go func() { cmd.Wait(); devNull.Close(); logFile.Close() }()
 
 	return &Session{
 		TicketID: ticketID,
 		LogPath:  logPath,
 		cmd:      cmd,
-		stdin:    stdin,
 		done:     make(chan struct{}),
 	}, nil
 }
 
-func (s *Session) Write(input string) error {
-	_, err := fmt.Fprint(s.stdin, input)
-	return err
+func (s *Session) Write(_ string) error {
+	return nil
 }
 
 func (s *Session) Stop() {
@@ -74,8 +72,6 @@ func (s *Session) Stop() {
 	default:
 		close(s.done)
 	}
-
-	s.stdin.Close()
 
 	if s.cmd.Process == nil {
 		return
