@@ -44,11 +44,12 @@ func main() {
 
 	m := tui.New()
 	m.OnStartTicket = func(ticketID string) {
-		if err := sessionMgr.StartTicket(ticketID); err != nil {
+		logPath, err := sessionMgr.StartTicket(ticketID)
+		if err != nil {
 			p.Send(tui.TicketErrorMsg{TicketID: ticketID, Err: err})
 			return
 		}
-		p.Send(tui.StatusMsg{Text: "Terminal opened for " + ticketID})
+		p.Send(tui.StatusMsg{Text: "log: tail -f " + logPath})
 	}
 
 	p = tea.NewProgram(m, tea.WithAltScreen())
