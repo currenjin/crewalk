@@ -1,110 +1,59 @@
 package session
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"time"
 )
 
 type Session struct {
 	TicketID string
-	LogPath  string
-	cmd      *exec.Cmd
-	done     chan struct{}
 }
 
 func Start(ticketID, worktreePath, claudeCmd string, claudeArgs []string) (*Session, error) {
-	logPath, logFile, err := openLogFile(ticketID)
-	if err != nil {
-		return nil, fmt.Errorf("log file: %w", err)
-	}
-
-	args := make([]string, 0, len(claudeArgs)+9)
+	args := make([]string, 0, len(claudeArgs)+4)
 	args = append(args, claudeArgs...)
-	args = append(args, "-p", fmt.Sprintf("/work %s", ticketID))
-	args = append(args, "--output-format", "stream-json")
-	args = append(args, "--verbose")
 	args = append(args, "--append-system-prompt",
 		"The git worktree has already been created for this ticket's branch. "+
 			"For the branch creation question, automatically choose 'skip'. "+
 			"For the PR creation question at the end, automatically choose 'push-pr'.",
 	)
+	args = append(args, "-p", "/work "+ticketID)
 
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		logFile.Close()
-		return nil, fmt.Errorf("open devnull: %w", err)
+	scriptPath := fmt.Sprintf("/tmp/crewalk_%s.sh", ticketID)
+	if err := os.WriteFile(scriptPath, []byte(buildLaunchScript(worktreePath, claudeCmd, args)), 0755); err != nil {
+		return nil, fmt.Errorf("write launch script: %w", err)
 	}
 
-	cmd := exec.Command(claudeCmd, args...)
-	cmd.Dir = worktreePath
-	cmd.Stdin = devNull
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	appleScript := fmt.Sprintf(`tell application "Terminal"
+	activate
+	do script "%s"
+end tell`, scriptPath)
 
-	if err := cmd.Start(); err != nil {
-		devNull.Close()
-		logFile.Close()
-		return nil, fmt.Errorf("start claude: %w", err)
+	if err := exec.Command("osascript", "-e", appleScript).Run(); err != nil {
+		os.Remove(scriptPath)
+		return nil, fmt.Errorf("open terminal: %w", err)
 	}
 
-	go func() { cmd.Wait(); devNull.Close(); logFile.Close() }()
+	go func() {
+		time.Sleep(30 * time.Second)
+		os.Remove(scriptPath)
+	}()
 
-	return &Session{
-		TicketID: ticketID,
-		LogPath:  logPath,
-		cmd:      cmd,
-		done:     make(chan struct{}),
-	}, nil
+	return &Session{TicketID: ticketID}, nil
 }
 
-func (s *Session) Write(_ string) error {
-	return nil
-}
-
-func (s *Session) Stop() {
-	select {
-	case <-s.done:
-		return
-	default:
-		close(s.done)
+func buildLaunchScript(worktreePath, claudeCmd string, args []string) string {
+	var sb strings.Builder
+	sb.WriteString("#!/bin/zsh\n")
+	sb.WriteString(fmt.Sprintf("cd %q\n", worktreePath))
+	sb.WriteString(claudeCmd)
+	for _, arg := range args {
+		sb.WriteByte(' ')
+		sb.WriteString(fmt.Sprintf("%q", arg))
 	}
-
-	if s.cmd.Process == nil {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() { done <- s.cmd.Wait() }()
-
-	select {
-	case <-ctx.Done():
-		s.cmd.Process.Kill()
-		s.cmd.Wait()
-	case <-done:
-	}
-}
-
-func (s *Session) Wait() error {
-	return s.cmd.Wait()
-}
-
-func openLogFile(ticketID string) (path string, f *os.File, err error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", nil, err
-	}
-	dir := filepath.Join(home, ".crewalk", "logs")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", nil, err
-	}
-	path = filepath.Join(dir, ticketID+".log")
-	f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	return path, f, err
+	sb.WriteString("\n")
+	return sb.String()
 }

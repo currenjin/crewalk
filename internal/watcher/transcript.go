@@ -12,14 +12,10 @@ import (
 )
 
 type PhaseEvent struct {
-	TicketID string
-	Phase    string
-	Status   string
-}
-
-type QuestionEvent struct {
-	TicketID string
-	Text     string
+	TicketID  string
+	Phase     string
+	Status    string
+	JSONLPath string
 }
 
 type jsonlEntry struct {
@@ -44,7 +40,6 @@ var ticketPattern = regexp.MustCompile(`(?i)((?:RP|TECH|DEV)-\d+)`)
 type Watcher struct {
 	projectsDir string
 	events      chan PhaseEvent
-	questions   chan QuestionEvent
 	offsets     map[string]int64
 	mu          sync.Mutex
 	stop        chan struct{}
@@ -54,7 +49,6 @@ func New(projectsDir string) *Watcher {
 	return &Watcher{
 		projectsDir: projectsDir,
 		events:      make(chan PhaseEvent, 100),
-		questions:   make(chan QuestionEvent, 20),
 		offsets:     make(map[string]int64),
 		stop:        make(chan struct{}),
 	}
@@ -62,10 +56,6 @@ func New(projectsDir string) *Watcher {
 
 func (w *Watcher) Events() <-chan PhaseEvent {
 	return w.events
-}
-
-func (w *Watcher) Questions() <-chan QuestionEvent {
-	return w.questions
 }
 
 func (w *Watcher) Start() {
@@ -80,7 +70,6 @@ func (w *Watcher) poll() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	defer close(w.events)
-	defer close(w.questions)
 
 	for {
 		select {
@@ -111,7 +100,6 @@ func (w *Watcher) scanFile(path string) {
 
 	w.mu.Lock()
 	offset := w.offsets[path]
-	// Reset offset if file was truncated
 	if info.Size() < offset {
 		offset = 0
 	}
@@ -137,7 +125,7 @@ func (w *Watcher) scanFile(path string) {
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	for scanner.Scan() {
-		w.parseLine(scanner.Text())
+		w.parseLine(path, scanner.Text())
 	}
 
 	w.mu.Lock()
@@ -145,7 +133,7 @@ func (w *Watcher) scanFile(path string) {
 	w.mu.Unlock()
 }
 
-func (w *Watcher) parseLine(line string) {
+func (w *Watcher) parseLine(path, line string) {
 	var entry jsonlEntry
 	if err := json.Unmarshal([]byte(line), &entry); err != nil {
 		return
@@ -165,40 +153,16 @@ func (w *Watcher) parseLine(line string) {
 			continue
 		}
 
-		if content.Name == "AskUserQuestion" {
-			text := extractQuestionText(content.Input)
-			select {
-			case w.questions <- QuestionEvent{TicketID: ticketID, Text: text}:
-			case <-w.stop:
-				return
-			}
-			continue
-		}
-
 		phase, status := detectPhase(content.Name, content.Input)
 		if phase == "" {
 			continue
 		}
 		select {
-		case w.events <- PhaseEvent{TicketID: ticketID, Phase: phase, Status: status}:
+		case w.events <- PhaseEvent{TicketID: ticketID, Phase: phase, Status: status, JSONLPath: path}:
 		case <-w.stop:
 			return
 		}
 	}
-}
-
-func extractQuestionText(raw json.RawMessage) string {
-	var input struct {
-		Question string `json:"question"`
-		Prompt   string `json:"prompt"`
-	}
-	if err := json.Unmarshal(raw, &input); err != nil {
-		return "?"
-	}
-	if input.Question != "" {
-		return input.Question
-	}
-	return input.Prompt
 }
 
 func extractTicketID(cwd string) string {

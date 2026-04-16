@@ -44,18 +44,16 @@ func main() {
 
 	m := tui.New()
 	m.OnStartTicket = func(ticketID string) {
-		logPath, err := sessionMgr.StartTicket(ticketID)
-		if err != nil {
+		if err := sessionMgr.StartTicket(ticketID); err != nil {
 			p.Send(tui.TicketErrorMsg{TicketID: ticketID, Err: err})
 			return
 		}
-		p.Send(tui.StatusMsg{Text: "log: tail -f " + logPath})
+		p.Send(tui.StatusMsg{Text: "Terminal opened for " + ticketID})
 	}
 
 	p = tea.NewProgram(m, tea.WithAltScreen())
 
 	go forwardPhaseEvents(ctx, w, p)
-	go forwardQuestionEvents(ctx, w, p, sessionMgr)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -86,37 +84,11 @@ func forwardPhaseEvents(ctx context.Context, w *watcher.Watcher, p *tea.Program)
 				return
 			}
 			p.Send(tui.PhaseChangeMsg{
-				TicketID: event.TicketID,
-				Phase:    tui.PhaseFromString(event.Phase),
-				Status:   event.Status,
+				TicketID:  event.TicketID,
+				Phase:     tui.PhaseFromString(event.Phase),
+				Status:    event.Status,
+				JSONLPath: event.JSONLPath,
 			})
-		}
-	}
-}
-
-func forwardQuestionEvents(ctx context.Context, w *watcher.Watcher, p *tea.Program, mgr *session.Manager) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case qEvent, ok := <-w.Questions():
-			if !ok {
-				return
-			}
-			responseCh := make(chan string, 1)
-			p.Send(tui.AskQuestionMsg{
-				TicketID: qEvent.TicketID,
-				Text:     qEvent.Text,
-				Response: responseCh,
-			})
-			// Single goroutine per question — cancelled via ctx if program exits
-			go func(ticketID string, ch <-chan string) {
-				select {
-				case answer := <-ch:
-					mgr.WriteToSession(ticketID, answer+"\n")
-				case <-ctx.Done():
-				}
-			}(qEvent.TicketID, responseCh)
 		}
 	}
 }

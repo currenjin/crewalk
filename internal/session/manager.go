@@ -2,7 +2,7 @@ package session
 
 import (
 	"fmt"
-	"log"
+	"os"
 	"sync"
 
 	"github.com/currenjin/crewalk/internal/config"
@@ -24,67 +24,27 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 }
 
-func (m *Manager) StartTicket(ticketID string) (logPath string, err error) {
+func (m *Manager) StartTicket(ticketID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if _, exists := m.sessions[ticketID]; exists {
-		return "", fmt.Errorf("ticket %s is already running", ticketID)
+		return fmt.Errorf("ticket %s is already running", ticketID)
 	}
 
 	worktreePath := m.cfg.WorktreePath(ticketID)
 
-	if err := m.git.CreateWorktree(ticketID, worktreePath); err != nil {
-		return "", fmt.Errorf("create worktree: %w", err)
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		if err := m.git.CreateWorktree(ticketID, worktreePath); err != nil {
+			return fmt.Errorf("create worktree: %w", err)
+		}
 	}
 
 	s, err := Start(ticketID, worktreePath, m.cfg.Claude.Command, m.cfg.Claude.Args)
 	if err != nil {
-		m.git.RemoveWorktree(worktreePath)
-		return "", fmt.Errorf("start session: %w", err)
+		return fmt.Errorf("start session: %w", err)
 	}
 
 	m.sessions[ticketID] = s
-	go m.waitAndCleanup(ticketID, worktreePath, s)
-
-	return s.LogPath, nil
-}
-
-func (m *Manager) WriteToSession(ticketID, input string) error {
-	m.mu.Lock()
-	s, exists := m.sessions[ticketID]
-	m.mu.Unlock()
-
-	if !exists {
-		return fmt.Errorf("no session for ticket %s", ticketID)
-	}
-	return s.Write(input)
-}
-
-func (m *Manager) StopTicket(ticketID string) {
-	m.mu.Lock()
-	s, exists := m.sessions[ticketID]
-	if exists {
-		delete(m.sessions, ticketID)
-	}
-	m.mu.Unlock()
-
-	if exists {
-		s.Stop()
-		if err := m.git.RemoveWorktree(m.cfg.WorktreePath(ticketID)); err != nil {
-			log.Printf("warn: failed to remove worktree for %s: %v", ticketID, err)
-		}
-	}
-}
-
-func (m *Manager) waitAndCleanup(ticketID, worktreePath string, s *Session) {
-	s.Wait()
-
-	m.mu.Lock()
-	delete(m.sessions, ticketID)
-	m.mu.Unlock()
-
-	if err := m.git.RemoveWorktree(worktreePath); err != nil {
-		log.Printf("warn: failed to remove worktree for %s: %v", ticketID, err)
-	}
+	return nil
 }

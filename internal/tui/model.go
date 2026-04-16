@@ -60,11 +60,6 @@ var phaseOrder = []Phase{
 
 var walkFrames = []string{"🚶", "🚶", "🧍", "🧍"}
 
-type Question struct {
-	Text     string
-	Response chan string
-}
-
 type Ticket struct {
 	ID        string
 	Phase     Phase
@@ -73,8 +68,7 @@ type Ticket struct {
 	TargetX   float64
 	IsMoving  bool
 	WalkFrame int
-	Question  *Question
-	IsAsking  bool
+	JSONLPath string
 }
 
 type tickMsg time.Time
@@ -84,21 +78,19 @@ type inputMode int
 const (
 	modeNormal inputMode = iota
 	modeNewTicket
-	modeQuestion
 	modeDetail
 )
 
 type Model struct {
-	tickets       []*Ticket
-	questionQueue []*Ticket
-	inputBuffer   string
-	mode          inputMode
-	statusMsg     string
-	width         int
-	height        int
-	tick          int
-	selectedIdx   int
-	logLines      []string
+	tickets     []*Ticket
+	inputBuffer string
+	mode        inputMode
+	statusMsg   string
+	width       int
+	height      int
+	tick        int
+	selectedIdx int
+	logLines    []string
 
 	OnStartTicket func(ticketID string)
 }
@@ -141,7 +133,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.mode == modeDetail && len(m.tickets) > 0 && m.selectedIdx < len(m.tickets) {
-			m.logLines = readLastLines(ticketLogPath(m.tickets[m.selectedIdx].ID), 40)
+			t := m.tickets[m.selectedIdx]
+			if t.JSONLPath != "" {
+				m.logLines = readLastLines(t.JSONLPath, 40)
+			}
 		}
 		return m, tickCmd()
 
@@ -161,7 +156,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedIdx = 0
 					}
 					m.mode = modeDetail
-					m.logLines = readLastLines(ticketLogPath(m.tickets[m.selectedIdx].ID), 40)
+					t := m.tickets[m.selectedIdx]
+					if t.JSONLPath != "" {
+						m.logLines = readLastLines(t.JSONLPath, 40)
+					}
 				}
 			case tea.KeyRunes:
 				if msg.String() == "n" {
@@ -211,48 +209,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.inputBuffer += msg.String()
 			}
-
-		case modeQuestion:
-			switch msg.Type {
-			case tea.KeyCtrlC:
-				return m, tea.Quit
-			case tea.KeyEnter:
-				if len(m.questionQueue) > 0 {
-					asking := m.questionQueue[0]
-					if asking.Question != nil {
-						asking.Question.Response <- m.inputBuffer
-						asking.IsAsking = false
-						asking.Question = nil
-						m.questionQueue = m.questionQueue[1:]
-						if len(m.questionQueue) > 0 {
-							m.questionQueue[0].IsAsking = true
-						}
-					}
-					m.inputBuffer = ""
-					if len(m.questionQueue) == 0 {
-						m.mode = modeNormal
-					}
-				}
-			case tea.KeyBackspace:
-				if len(m.inputBuffer) > 0 {
-					m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
-				}
-			default:
-				m.inputBuffer += msg.String()
-			}
-		}
-
-	case AskQuestionMsg:
-		ticket := m.findTicket(msg.TicketID)
-		if ticket == nil {
-			msg.Response <- ""
-			break
-		}
-		ticket.Question = &Question{Text: msg.Text, Response: msg.Response}
-		m.questionQueue = append(m.questionQueue, ticket)
-		if len(m.questionQueue) == 1 {
-			ticket.IsAsking = true
-			m.mode = modeQuestion
 		}
 
 	case AddTicketMsg:
@@ -271,6 +227,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ticket.Status = msg.Status
 			ticket.TargetX = float64(msg.Phase)
 			ticket.IsMoving = true
+			if msg.JSONLPath != "" {
+				ticket.JSONLPath = msg.JSONLPath
+			}
 		}
 
 	case StatusMsg:
@@ -312,7 +271,6 @@ func (m Model) View() string {
 		m.renderHeader(),
 		m.renderRooms(),
 		m.renderCorridor(),
-		m.renderQuestionArea(),
 		m.renderNewTicketInput(),
 		m.renderStatusBar(),
 	)
@@ -365,18 +323,15 @@ var (
 			Foreground(lipgloss.Color("240")).
 			Height(3)
 
-	questionBoxStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("214")).
-				Padding(1, 3).
-				Width(60)
+	inputBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("214")).
+			Padding(1, 3).
+			Width(60)
 
 	inputStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("255")).
 			Bold(true)
-
-	waitingCharStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("245"))
 
 	detailBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -412,7 +367,7 @@ func (m Model) renderRoom(phase Phase) string {
 	selectedTicket := m.selectedTicket()
 
 	for _, t := range m.tickets {
-		if t.Phase == phase && !t.IsMoving && !t.IsAsking {
+		if t.Phase == phase && !t.IsMoving {
 			sprite := "🧑"
 			if phase == PhaseDone {
 				sprite = "✅"
@@ -480,36 +435,6 @@ func (m Model) renderCorridor() string {
 	return corridorStyle.Render(corridor)
 }
 
-func (m Model) renderQuestionArea() string {
-	if len(m.questionQueue) == 0 {
-		return ""
-	}
-
-	var lines []string
-
-	waitingLine := ""
-	for i, t := range m.questionQueue {
-		if i == 0 {
-			lines = append(lines, fmt.Sprintf("🧑 %s", ticketNameStyle.Render(t.ID)))
-		} else {
-			waitingLine += waitingCharStyle.Render(fmt.Sprintf("  🧍 %s (대기)", t.ID))
-		}
-	}
-	if waitingLine != "" {
-		lines = append(lines, waitingLine)
-	}
-
-	asking := m.questionQueue[0]
-	if asking.Question != nil {
-		lines = append(lines, "")
-		lines = append(lines, asking.Question.Text)
-		lines = append(lines, "")
-		lines = append(lines, inputStyle.Render("> "+m.inputBuffer+"_"))
-	}
-
-	return "\n" + questionBoxStyle.Render(strings.Join(lines, "\n"))
-}
-
 func (m Model) renderNewTicketInput() string {
 	if m.mode != modeNewTicket {
 		return ""
@@ -521,7 +446,7 @@ func (m Model) renderNewTicketInput() string {
 		"\n\n" +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("[Enter] start  [Esc] cancel")
 
-	return "\n" + questionBoxStyle.Render(content)
+	return "\n" + inputBoxStyle.Render(content)
 }
 
 func (m Model) renderStatusBar() string {
@@ -531,10 +456,10 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render(m.statusMsg))
 	}
 
-	if m.mode == modeNormal && len(m.questionQueue) == 0 {
+	if m.mode == modeNormal {
 		hint := "[n] new ticket  [ctrl+c] quit"
 		if len(m.tickets) > 0 {
-			hint = "[n] new ticket  [tab] select  [enter] enter room  [ctrl+c] quit"
+			hint = "[n] new ticket  [tab] select  [enter] detail  [ctrl+c] quit"
 		}
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(hint))
 	}
@@ -564,7 +489,11 @@ func (m Model) renderDetail() string {
 
 	var logText string
 	if len(m.logLines) == 0 {
-		logText = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true).Render("no output yet...")
+		msg := "waiting for activity..."
+		if t.JSONLPath == "" {
+			msg = "Claude is starting in Terminal..."
+		}
+		logText = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true).Render(msg)
 	} else {
 		colored := make([]string, len(m.logLines))
 		for i, l := range m.logLines {
@@ -622,11 +551,6 @@ func detailSprite(phase Phase, tick int) string {
 	}
 	frames := []string{"🚶", "🚶‍", "🧍", "🧍"}
 	return frames[tick%len(frames)]
-}
-
-func ticketLogPath(ticketID string) string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".crewalk", "logs", ticketID+".log")
 }
 
 func readLastLines(path string, n int) []string {

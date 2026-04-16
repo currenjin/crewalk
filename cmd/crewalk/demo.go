@@ -16,7 +16,6 @@ type demoStep struct {
 	phase    tui.Phase
 	status   string
 	add      bool
-	question string
 	logs     []string
 }
 
@@ -82,7 +81,6 @@ var demoScript = []demoStep{
 	},
 	{
 		delay: 1500 * time.Millisecond, ticketID: "RP-5678", phase: tui.PhasePushing, status: "opening PR...",
-		question: "Should I squash commits before merging?",
 		logs: []string{
 			"Pushing branch feature/RP-5678...",
 		},
@@ -103,21 +101,6 @@ func runDemo(p *tea.Program) {
 
 		if step.add {
 			p.Send(tui.AddTicketMsg{TicketID: step.ticketID, Status: step.status})
-			continue
-		}
-		if step.question != "" {
-			responseCh := make(chan string, 1)
-			p.Send(tui.AskQuestionMsg{
-				TicketID: step.ticketID,
-				Text:     step.question,
-				Response: responseCh,
-			})
-			go func(ch chan string, ticketID string, phase tui.Phase, status string, delay time.Duration) {
-				time.Sleep(2500 * time.Millisecond)
-				ch <- "yes, squash them"
-				time.Sleep(delay)
-				p.Send(tui.PhaseChangeMsg{TicketID: ticketID, Phase: phase, Status: status})
-			}(responseCh, step.ticketID, step.phase, step.status, step.delay)
 			continue
 		}
 		p.Send(tui.PhaseChangeMsg{
