@@ -22,6 +22,7 @@ type jsonlEntry struct {
 	Type    string        `json:"type"`
 	Cwd     string        `json:"cwd"`
 	Message *assistantMsg `json:"message,omitempty"`
+	Result  string        `json:"result,omitempty"`
 }
 
 type assistantMsg struct {
@@ -41,6 +42,7 @@ type Watcher struct {
 	projectsDir string
 	events      chan PhaseEvent
 	offsets     map[string]int64
+	fileTickets map[string]string // JSONL path → last known ticketID
 	mu          sync.Mutex
 	stop        chan struct{}
 }
@@ -50,6 +52,7 @@ func New(projectsDir string) *Watcher {
 		projectsDir: projectsDir,
 		events:      make(chan PhaseEvent, 100),
 		offsets:     make(map[string]int64),
+		fileTickets: make(map[string]string),
 		stop:        make(chan struct{}),
 	}
 }
@@ -139,12 +142,29 @@ func (w *Watcher) parseLine(path, line string) {
 		return
 	}
 
-	if entry.Type != "assistant" || entry.Message == nil {
+	ticketID := extractTicketID(entry.Cwd)
+	if ticketID != "" {
+		w.mu.Lock()
+		w.fileTickets[path] = ticketID
+		w.mu.Unlock()
+	} else {
+		w.mu.Lock()
+		ticketID = w.fileTickets[path]
+		w.mu.Unlock()
+	}
+	if ticketID == "" {
 		return
 	}
 
-	ticketID := extractTicketID(entry.Cwd)
-	if ticketID == "" {
+	if entry.Type == "result" {
+		select {
+		case w.events <- PhaseEvent{TicketID: ticketID, Phase: "DONE", Status: "done", JSONLPath: path}:
+		case <-w.stop:
+		}
+		return
+	}
+
+	if entry.Type != "assistant" || entry.Message == nil {
 		return
 	}
 
@@ -175,7 +195,8 @@ func extractTicketID(cwd string) string {
 }
 
 func detectPhase(toolName string, toolInput json.RawMessage) (phase, status string) {
-	if toolName == "Skill" {
+	switch toolName {
+	case "Skill":
 		var input struct {
 			Skill string `json:"skill"`
 		}
@@ -191,9 +212,49 @@ func detectPhase(toolName string, toolInput json.RawMessage) (phase, status stri
 				return "PUSHING", "creating PR"
 			}
 		}
-	}
 
-	switch toolName {
+	case "Read":
+		var input struct {
+			FilePath string `json:"file_path"`
+		}
+		if err := json.Unmarshal(toolInput, &input); err == nil {
+			p := input.FilePath
+			switch {
+			case strings.Contains(p, "start-branch/SKILL"):
+				return "BRANCHING", "creating branch"
+			case strings.Contains(p, "jira-to-plan/SKILL"):
+				return "PLANNING", "generating plan"
+			case strings.Contains(p, "augmented-coding/SKILL"):
+				return "CODING", "implementing"
+			case strings.Contains(p, "push-pr/SKILL"):
+				return "PUSHING", "creating PR"
+			}
+		}
+
+	case "Write", "Edit", "NotebookEdit":
+		var input struct {
+			FilePath string `json:"file_path"`
+		}
+		if err := json.Unmarshal(toolInput, &input); err == nil {
+			if strings.Contains(input.FilePath, "augmented-coding") && strings.HasSuffix(input.FilePath, "-plan.md") {
+				return "PLANNING", "saving plan"
+			}
+		}
+
+	case "Bash":
+		var input struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(toolInput, &input); err == nil {
+			cmd := input.Command
+			switch {
+			case strings.Contains(cmd, "gradlew") || strings.Contains(cmd, "git commit"):
+				return "CODING", "implementing"
+			case strings.Contains(cmd, "git push") || strings.Contains(cmd, "gh pr"):
+				return "PUSHING", "creating PR"
+			}
+		}
+
 	case "mcp__atlassian__read_jira_issue":
 		return "PLANNING", "reading JIRA"
 	}
