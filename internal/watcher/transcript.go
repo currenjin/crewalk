@@ -252,6 +252,18 @@ func extractTicketID(cwd string) string {
 	return ""
 }
 
+var sourceExts = map[string]bool{
+	".kt": true, ".java": true, ".ts": true, ".tsx": true,
+	".js": true, ".jsx": true, ".py": true, ".go": true,
+	".rb": true, ".rs": true, ".swift": true, ".cs": true,
+	".cpp": true, ".c": true, ".h": true,
+}
+
+func isSourceFile(p string) bool {
+	ext := filepath.Ext(p)
+	return sourceExts[ext]
+}
+
 func detectPhase(toolName string, toolInput json.RawMessage) (phase, status string) {
 	switch toolName {
 	case "Skill":
@@ -294,8 +306,12 @@ func detectPhase(toolName string, toolInput json.RawMessage) (phase, status stri
 			FilePath string `json:"file_path"`
 		}
 		if err := json.Unmarshal(toolInput, &input); err == nil {
-			if strings.Contains(input.FilePath, "augmented-coding") && strings.HasSuffix(input.FilePath, "-plan.md") {
+			p := input.FilePath
+			if strings.Contains(p, "augmented-coding") && strings.HasSuffix(p, "-plan.md") {
 				return "PLANNING", "saving plan"
+			}
+			if isSourceFile(p) {
+				return "CODING", "implementing"
 			}
 		}
 
@@ -306,14 +322,20 @@ func detectPhase(toolName string, toolInput json.RawMessage) (phase, status stri
 		if err := json.Unmarshal(toolInput, &input); err == nil {
 			cmd := input.Command
 			switch {
-			case strings.Contains(cmd, "gradlew") || strings.Contains(cmd, "git commit"):
+			case (strings.Contains(cmd, "git checkout") && strings.Contains(cmd, "-b")) ||
+				(strings.Contains(cmd, "git switch") && strings.Contains(cmd, "-c")):
+				return "BRANCHING", "creating branch"
+			case strings.Contains(cmd, "gradlew") || strings.Contains(cmd, "mvn") ||
+				strings.Contains(cmd, "git commit"):
 				return "CODING", "implementing"
 			case strings.Contains(cmd, "git push") || strings.Contains(cmd, "gh pr"):
 				return "PUSHING", "creating PR"
 			}
 		}
 
-	case "mcp__atlassian__read_jira_issue":
+	case "mcp__atlassian__read_jira_issue",
+		"mcp__claude_ai_Atlassian__getJiraIssue",
+		"mcp__claude_ai_Atlassian__search":
 		return "PLANNING", "reading JIRA"
 	}
 
